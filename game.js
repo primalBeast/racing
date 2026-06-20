@@ -1,0 +1,2351 @@
+(() => {
+  'use strict';
+
+  function showBootError(message) {
+    const loading = document.getElementById('loading');
+    if (!loading) return;
+    loading.innerHTML = `<div class="loading-text" style="color:#ff2d95; letter-spacing:0.08em; text-align:center; max-width:520px; line-height:1.5;">${message}</div>`;
+  }
+
+  const canvas = document.getElementById('game-canvas');
+  if (!canvas) {
+    showBootError('Game canvas not found.');
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    showBootError('Could not start the game renderer.');
+    return;
+  }
+
+  ctx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+  const W = canvas.width;
+  const H = canvas.height;
+
+  const CAR_TYPES = window.CAR_TYPES;
+  if (!CAR_TYPES || !CAR_TYPES.length) {
+    showBootError('cars.js failed to load. Serve the game from a local web server and refresh.');
+    return;
+  }
+  const CAR_ASSET_VERSION = '4';
+  const ASSETS = {
+    titleScreen: 'assets/title-screen.jpg',
+  };
+
+  const LANE_COUNT = 5;
+  const GUARD_RAIL_WIDTH = 10;
+  const TUNNEL_PERIOD = 3200;
+  const TUNNEL_LENGTH = 900;
+  const SPEED_STRIP_PERIOD = 1400;
+  const SPEED_STRIP_LENGTH = 220;
+  const DIFFICULTY_RAMP_DISTANCE = 9000;
+  const MAX_SPEED_KMH = 250;
+  const LAUNCH_SPEED_KMH = 100;
+  const SPEED_PHASE1_DURATION = 1.5;
+  const SPEED_PHASE2_DURATION = 36;
+  const WALL_RECOVERY_RATE = 130;
+  const WALL_SCORE_PENALTY = 45;
+  const ENGINE_PITCH_SCALE = 0.34;
+  const ENGINE_FILTER_SCALE = 0.38;
+  const PLAYER_Y = H - 110;
+  const ROAD_WIDTH = W * 0.34;
+  const CURVE_AMPLITUDE = W * 0.18;
+  const STRAIGHT_SEGMENT_MIN = 480;
+  const STRAIGHT_SEGMENT_MAX = 950;
+  const CURVE_SEGMENT_MIN = 300;
+  const CURVE_SEGMENT_MAX = 520;
+  const SPEED_TO_KMH = 15;
+  const TRAFFIC_KMH_MIN = 60;
+  const TRAFFIC_KMH_MAX = 120;
+  const ROAD_STEP = 2;
+  const STATE = { LOADING: 0, TITLE: 1, COUNTDOWN: 2, PLAYING: 3, GAMEOVER: 4 };
+  const COUNTDOWN_DURATION = 3;
+  const TRAFFIC_MAX_SPEED_RATIO = 0.84;
+  const STEER_BASE = 12;
+  const MAX_CAR_ANGLE = 0.38;
+  const ANGLE_RESPONSIVENESS = 14;
+  const TRAFFIC_MIN_GAP = 1.2;
+  const TRAFFIC_LANE_SMOOTH = 10;
+  const TRAFFIC_COLLISION_COOLDOWN = 0.4;
+  const TRAFFIC_LEAD_MIN = 680;
+  const TRAFFIC_LEAD_APPROACH_SCALE = 24;
+  const TRAFFIC_CULL_ABOVE = 1100;
+  const MAX_HIT_POINTS = 3;
+  const PLAYER_HIT_INVULN = 1.1;
+  const BOUNCE_STRENGTH = 3.2;
+  const BOUNCE_DAMPING = 0.86;
+
+  let state = STATE.LOADING;
+  let images = {};
+  let keys = {};
+  let audioCtx = null;
+
+  let selectedCarIndex = 0;
+  let activeCar = CAR_TYPES[0];
+  let raceTime = 0;
+  let speedPenaltyKmh = 0;
+  let recoveryTargetKmh = 0;
+
+  let player = {
+    x: W / 2,
+    y: PLAYER_Y,
+    width: CAR_TYPES[0].width,
+    height: CAR_TYPES[0].height,
+    angle: 0,
+    prevX: W / 2,
+    vx: 0,
+  };
+  let hitPoints = MAX_HIT_POINTS;
+  let playerInvulnTimer = 0;
+  let hitFlashTimer = 0;
+  let railScrapeTimer = 0;
+  let railScrapeSide = 0;
+  let wallScrapeSoundTimer = 0;
+  let obstacles = [];
+  let particles = [];
+  let rainDrops = [];
+  let themeParticles = [];
+  let pickups = [];
+  let floatingTexts = [];
+  let activeTheme = null;
+  let combo = 0;
+  let comboTimer = 0;
+  let scoreMultiplier = 1;
+  let speedBoostTimer = 0;
+  let themeBannerTimer = 0;
+  let pickupSpawnTimer = 2.5;
+  let driftSparkTimer = 0;
+  let showLegend = true;
+  let roadOffset = 0;
+  let bgOffset = 0;
+  let score = 0;
+  let distance = 0;
+  let speed = 0;
+  let nitro = 100;
+  let nitroActive = false;
+  let spawnTimer = 0;
+  let difficulty = 1;
+  let shakeTimer = 0;
+  let countdownTimer = 0;
+  let lastTime = 0;
+  let animFrame = 0;
+  let roadCurveAnchors = [];
+
+  function setLoadingProgress(loaded, total, label) {
+    const fill = document.getElementById('loading-fill');
+    const text = document.querySelector('.loading-text');
+    if (fill) fill.style.width = `${(loaded / total) * 100}%`;
+    if (text) text.textContent = label || `LOADING ${loaded}/${total}`;
+  }
+
+  function loadImage(key, src, timeoutMs = 15000) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`Timed out loading ${src}`));
+      }, timeoutMs);
+
+      img.onload = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ key, img });
+      };
+      img.onerror = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error(`Failed to load ${src}`));
+      };
+      img.src = src;
+    });
+  }
+
+  function resolveActiveTheme() {
+    if (typeof window.pickRandomTheme === 'function') {
+      return window.pickRandomTheme();
+    }
+    return {
+      id: 'fallback-night',
+      name: 'Tokyo Night Run',
+      subtitle: 'Neon streets after dark',
+      rain: 0.6,
+      draw(ctx, width, height) {
+        const grad = ctx.createLinearGradient(0, 0, 0, height);
+        grad.addColorStop(0, '#0a0618');
+        grad.addColorStop(0.5, '#1a1040');
+        grad.addColorStop(1, '#060610');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, height);
+      },
+    };
+  }
+
+  async function loadAssets() {
+    activeTheme = resolveActiveTheme();
+
+    const carEntries = CAR_TYPES.map((car) => [
+      car.id,
+      `${car.asset}?v=${CAR_ASSET_VERSION}`,
+    ]);
+    const themeBgEntry = activeTheme.image
+      ? [[`bg-${activeTheme.id}`, activeTheme.image]]
+      : [];
+    const entries = [...Object.entries(ASSETS), ...themeBgEntry, ...carEntries];
+    const total = entries.length;
+    let loaded = 0;
+    setLoadingProgress(0, total, `LOADING ASSETS 0/${total}`);
+
+    const results = [];
+    for (const [key, src] of entries) {
+      const result = await loadImage(key, src, 30000);
+      results.push(result);
+      loaded++;
+      setLoadingProgress(loaded, total, `LOADING ASSETS ${loaded}/${total}`);
+    }
+
+    results.forEach(({ key, img }) => { images[key] = img; });
+    themeParticles = activeTheme.initParticles ? activeTheme.initParticles(W, H) : [];
+    document.getElementById('title-bg').style.backgroundImage = `url(${ASSETS.titleScreen})`;
+    document.getElementById('loading').classList.add('hidden');
+    showTitle();
+  }
+
+  function statBar(value, max) {
+    const filled = Math.max(1, Math.min(5, Math.round((value / max) * 5)));
+    return '▮'.repeat(filled) + '▯'.repeat(5 - filled);
+  }
+
+  function updateCarSelectUI() {
+    const car = CAR_TYPES[selectedCarIndex];
+    document.getElementById('car-preview').src = `${car.asset}?v=${CAR_ASSET_VERSION}`;
+    document.getElementById('car-name').textContent = car.name;
+    document.getElementById('car-tagline').textContent = car.tagline;
+    document.getElementById('car-stats').innerHTML = `
+      <span>Speed</span><span>${statBar(car.baseSpeed, 7)}</span>
+      <span>Handling</span><span>${statBar(car.steerMult, 1.4)}</span>
+      <span>Nitro</span><span>${statBar(car.nitroMult, 2)}</span>
+      <span>Efficiency</span><span>${statBar(1.2 - car.nitroDrain, 0.7)}</span>
+    `;
+  }
+
+  function pickRandomCar() {
+    selectedCarIndex = Math.floor(Math.random() * CAR_TYPES.length);
+    updateCarSelectUI();
+  }
+
+  function changeCar(delta) {
+    selectedCarIndex = (selectedCarIndex + delta + CAR_TYPES.length) % CAR_TYPES.length;
+    updateCarSelectUI();
+    initAudio();
+    previewEngineSound();
+  }
+
+  function pickTrafficCar() {
+    const pool = [];
+    CAR_TYPES.forEach((car, index) => {
+      if (activeCar && car.id === activeCar.id) return;
+      for (let i = 0; i < car.trafficWeight; i++) pool.push(index);
+    });
+    if (!pool.length) return CAR_TYPES[(selectedCarIndex + 1) % CAR_TYPES.length];
+    return CAR_TYPES[pool[Math.floor(Math.random() * pool.length)]];
+  }
+
+  function worldYAtScreenY(screenY) {
+    return roadOffset + (H - screenY);
+  }
+
+  function initRoadCurve() {
+    roadCurveAnchors = [
+      { wy: 0, offset: 0, type: 'straight' },
+      { wy: H - PLAYER_Y, offset: 0, type: 'straight' },
+    ];
+    ensureRoadCurveUpTo(20000);
+  }
+
+  function pickCurveTarget(currentOffset) {
+    const roll = Math.random();
+    if (roll < 0.55) {
+      return currentOffset > 0
+        ? -CURVE_AMPLITUDE * (0.8 + Math.random() * 0.2)
+        : CURVE_AMPLITUDE * (0.8 + Math.random() * 0.2);
+    }
+    if (roll < 0.8) {
+      return (Math.random() < 0.5 ? -1 : 1) * CURVE_AMPLITUDE * (0.55 + Math.random() * 0.35);
+    }
+    return 0;
+  }
+
+  function appendRoadSegment(last, type) {
+    let segLen;
+    let offset;
+    if (type === 'straight') {
+      segLen = STRAIGHT_SEGMENT_MIN + Math.random() * (STRAIGHT_SEGMENT_MAX - STRAIGHT_SEGMENT_MIN);
+      offset = last.offset;
+    } else {
+      segLen = CURVE_SEGMENT_MIN + Math.random() * (CURVE_SEGMENT_MAX - CURVE_SEGMENT_MIN);
+      offset = pickCurveTarget(last.offset);
+    }
+    roadCurveAnchors.push({ wy: last.wy + segLen, offset, type });
+  }
+
+  function ensureRoadCurveUpTo(targetWy) {
+    while (roadCurveAnchors[roadCurveAnchors.length - 1].wy < targetWy) {
+      const last = roadCurveAnchors[roadCurveAnchors.length - 1];
+      const lastType = last.type || 'straight';
+      let nextType;
+      if (lastType === 'straight') {
+        nextType = 'curve';
+      } else if (Math.random() < 0.45) {
+        nextType = 'straight';
+      } else {
+        nextType = 'curve';
+      }
+      appendRoadSegment(last, nextType);
+    }
+  }
+
+  function interpolateSegmentOffset(a, b, wy) {
+    const t = (wy - a.wy) / (b.wy - a.wy);
+    if (a.type === 'straight' && b.type === 'straight' && Math.abs(a.offset - b.offset) < 1) {
+      return a.offset;
+    }
+    if (a.type === 'straight' && Math.abs(a.offset - b.offset) < 1) {
+      return a.offset;
+    }
+    if (b.type === 'straight' && Math.abs(a.offset - b.offset) < 1) {
+      return b.offset;
+    }
+    const curveT = 0.5 - 0.5 * Math.cos(Math.max(0, Math.min(1, t)) * Math.PI);
+    return a.offset + (b.offset - a.offset) * curveT;
+  }
+
+  function roadOffsetAtWorldY(wy) {
+    ensureRoadCurveUpTo(wy + 6000);
+    for (let i = 0; i < roadCurveAnchors.length - 1; i++) {
+      const a = roadCurveAnchors[i];
+      const b = roadCurveAnchors[i + 1];
+      if (wy >= a.wy && wy <= b.wy) {
+        return interpolateSegmentOffset(a, b, wy);
+      }
+    }
+    return roadCurveAnchors[roadCurveAnchors.length - 1].offset;
+  }
+
+  function roadCenterAtScreenY(screenY) {
+    const wy = worldYAtScreenY(screenY);
+    return W / 2 + roadOffsetAtWorldY(wy);
+  }
+
+  function kmhToSpeed(kmh) {
+    return kmh / SPEED_TO_KMH;
+  }
+
+  function speedToKmh(gameSpeed) {
+    return gameSpeed * SPEED_TO_KMH;
+  }
+
+  function targetSpeedKmh(elapsed) {
+    if (elapsed <= SPEED_PHASE1_DURATION) {
+      const t = elapsed / SPEED_PHASE1_DURATION;
+      const eased = 1 - (1 - t) ** 3;
+      return LAUNCH_SPEED_KMH * eased;
+    }
+    const phase2 = Math.min(1, (elapsed - SPEED_PHASE1_DURATION) / SPEED_PHASE2_DURATION);
+    const eased = phase2 * phase2 * (3 - 2 * phase2);
+    return LAUNCH_SPEED_KMH + (MAX_SPEED_KMH - LAUNCH_SPEED_KMH) * eased;
+  }
+
+  function currentTargetKmh() {
+    const stripMult = speedBoostTimer > 0 ? 1.1 : 1;
+    return Math.min(MAX_SPEED_KMH, targetSpeedKmh(raceTime)) * stripMult;
+  }
+
+  function updatePlayerSpeed(dt) {
+    raceTime += dt;
+    const curveKmh = currentTargetKmh();
+
+    if (speedPenaltyKmh > 0) {
+      const recoveryRate = recoveryTargetKmh > 0 ? WALL_RECOVERY_RATE : 20;
+      speedPenaltyKmh = Math.max(0, speedPenaltyKmh - dt * recoveryRate);
+    }
+
+    let targetKmh = curveKmh;
+    if (recoveryTargetKmh > 0) {
+      targetKmh = Math.max(recoveryTargetKmh, curveKmh) - speedPenaltyKmh;
+      if (speedPenaltyKmh <= 0) recoveryTargetKmh = 0;
+    } else if (speedPenaltyKmh > 0) {
+      targetKmh = curveKmh - speedPenaltyKmh;
+    }
+
+    speed = kmhToSpeed(Math.max(0, targetKmh));
+  }
+
+  function effectiveSpeedKmh() {
+    const curveKmh = currentTargetKmh();
+    if (recoveryTargetKmh > 0) {
+      return Math.max(0, Math.max(recoveryTargetKmh, curveKmh) - speedPenaltyKmh);
+    }
+    return curveKmh;
+  }
+
+  function beginWallSpeedRecovery() {
+    const topKmh = effectiveSpeedKmh();
+    recoveryTargetKmh = topKmh;
+    speedPenaltyKmh = topKmh * 0.2;
+  }
+
+  function applySpeedPenalty(kmhLoss) {
+    speedPenaltyKmh = Math.min(speedPenaltyKmh + kmhLoss, MAX_SPEED_KMH * 0.4);
+  }
+
+  function penalizeRaceProgress(seconds) {
+    raceTime = Math.max(0, raceTime - seconds);
+  }
+
+  function maxTrafficSpeed(currentSpeed) {
+    return Math.min(
+      kmhToSpeed(TRAFFIC_KMH_MAX),
+      currentSpeed * TRAFFIC_MAX_SPEED_RATIO,
+      currentSpeed - 0.4
+    );
+  }
+
+  function clampTrafficSpeed(obs, currentSpeed) {
+    const cap = maxTrafficSpeed(currentSpeed);
+    if (obs.speed > cap) obs.speed = cap;
+    return obs.speed;
+  }
+
+  function randomTrafficSpeed(currentSpeed) {
+    const currentKmh = speedToKmh(currentSpeed);
+    const minKmh = currentKmh < TRAFFIC_KMH_MIN
+      ? Math.max(16, currentKmh * 0.58)
+      : TRAFFIC_KMH_MIN;
+    const maxKmh = Math.min(
+      TRAFFIC_KMH_MAX,
+      Math.max(minKmh + 3, speedToKmh(maxTrafficSpeed(currentSpeed)))
+    );
+    if (maxKmh <= minKmh) {
+      const fallbackKmh = Math.max(12, minKmh * 0.9);
+      return { speed: kmhToSpeed(fallbackKmh), kmh: Math.round(fallbackKmh) };
+    }
+    const kmh = minKmh + Math.random() * (maxKmh - minKmh);
+    return { speed: kmhToSpeed(kmh), kmh: Math.round(kmh) };
+  }
+
+  function screenYFromWorldY(worldY) {
+    return H - (worldY - roadOffset);
+  }
+
+  function obstacleWorldY(obs) {
+    return roadOffset + (H - obs.y);
+  }
+
+  function trafficSpawnScreenY(height, currentSpeed, trafficSpeed) {
+    const approach = Math.max(4, currentSpeed - trafficSpeed);
+    const playerWorldY = worldYAtScreenY(player.y);
+    const lead = TRAFFIC_LEAD_MIN + approach * TRAFFIC_LEAD_APPROACH_SCALE;
+    const spawnWorldY = playerWorldY + lead;
+    const spawnY = screenYFromWorldY(spawnWorldY);
+    const aheadOfPlayer = player.y - height - 120;
+    return Math.min(-height - 48, aheadOfPlayer, spawnY);
+  }
+
+  function isTrafficBehind(obs) {
+    return obs.y + obs.height * 0.4 > player.y + player.height * 0.45;
+  }
+
+  function roadBoundsAtScreenY(screenY) {
+    const center = roadCenterAtScreenY(screenY);
+    return {
+      left: center - ROAD_WIDTH / 2,
+      right: center + ROAD_WIDTH / 2,
+      center,
+    };
+  }
+
+  function laneFractionAt(laneIndex) {
+    return (laneIndex + 0.5) / LANE_COUNT;
+  }
+
+  function laneXAt(screenY, laneIndex) {
+    return laneXFromFraction(screenY, laneFractionAt(laneIndex));
+  }
+
+  function laneXFromFraction(screenY, fraction) {
+    const bounds = roadBoundsAtScreenY(screenY);
+    return bounds.left + ROAD_WIDTH * fraction;
+  }
+
+  function buildRoadClipPath() {
+    const leftPts = [];
+    const rightPts = [];
+    for (let y = 0; y <= H; y += ROAD_STEP) {
+      const bounds = roadBoundsAtScreenY(y);
+      leftPts.push({ x: bounds.left, y });
+      rightPts.push({ x: bounds.right, y });
+    }
+    ctx.beginPath();
+    ctx.moveTo(leftPts[0].x, leftPts[0].y);
+    leftPts.forEach((p) => ctx.lineTo(p.x, p.y));
+    for (let i = rightPts.length - 1; i >= 0; i--) {
+      ctx.lineTo(rightPts[i].x, rightPts[i].y);
+    }
+    ctx.closePath();
+  }
+
+  function playerRoadLimits(screenY) {
+    const bounds = roadBoundsAtScreenY(screenY);
+    const halfW = player.width * 0.38;
+    const inset = GUARD_RAIL_WIDTH + 6;
+    return {
+      left: bounds.left + inset + halfW,
+      right: bounds.right - inset - halfW,
+      bounds,
+    };
+  }
+
+  function clampPlayerToRoad() {
+    const limits = playerRoadLimits(player.y);
+    if (player.x < limits.left) {
+      player.x = limits.left;
+      scrapeGuardRail(-1);
+    } else if (player.x > limits.right) {
+      player.x = limits.right;
+      scrapeGuardRail(1);
+    }
+  }
+
+  function scrapeGuardRail(side) {
+    railScrapeTimer = 0.18;
+    railScrapeSide = side;
+    shakeTimer = Math.max(shakeTimer, 4);
+    beginWallSpeedRecovery();
+    if (wallScrapeSoundTimer <= 0) {
+      initAudio();
+      playWallScrapeSound();
+      const penalty = Math.floor(WALL_SCORE_PENALTY * difficulty);
+      score = Math.max(0, score - penalty);
+      addFloatingText(player.x, player.y - 54, `-${penalty}`, '#ff6eb4');
+      wallScrapeSoundTimer = 0.1;
+    }
+    if (animFrame % 2 === 0) {
+      const limits = playerRoadLimits(player.y);
+      const x = side < 0 ? limits.bounds.left + GUARD_RAIL_WIDTH : limits.bounds.right - GUARD_RAIL_WIDTH;
+      particles.push({
+        x: x + side * 4,
+        y: player.y + player.height * 0.45 + Math.random() * 20,
+        vx: side * (2 + Math.random() * 3),
+        vy: -1 + Math.random() * 2,
+        life: 1,
+        decay: 0.06 + Math.random() * 0.04,
+        color: '#ffe14d',
+        size: 3 + Math.random() * 4,
+      });
+    }
+  }
+
+  function isInTunnel(wy) {
+    const phase = wy % TUNNEL_PERIOD;
+    return phase < TUNNEL_LENGTH;
+  }
+
+  function tunnelPhase(wy) {
+    return (wy % TUNNEL_PERIOD) / TUNNEL_LENGTH;
+  }
+
+  function isOnSpeedStrip(wy) {
+    const phase = wy % SPEED_STRIP_PERIOD;
+    return phase < SPEED_STRIP_LENGTH;
+  }
+
+  function showTitle() {
+    state = STATE.TITLE;
+    pickRandomCar();
+    document.getElementById('title-screen').classList.remove('hidden');
+    document.getElementById('title-screen').classList.add('active');
+    document.getElementById('game-over-screen').classList.add('hidden');
+  }
+
+  function startGame() {
+    state = STATE.COUNTDOWN;
+    countdownTimer = COUNTDOWN_DURATION;
+    document.getElementById('title-screen').classList.add('hidden');
+    document.getElementById('game-over-screen').classList.add('hidden');
+
+    activeCar = CAR_TYPES[selectedCarIndex];
+
+    player = {
+      x: W / 2,
+      y: PLAYER_Y,
+      width: activeCar.width,
+      height: activeCar.height,
+      angle: 0,
+      prevX: W / 2,
+      vx: 0,
+    };
+    hitPoints = MAX_HIT_POINTS;
+    playerInvulnTimer = 0;
+    hitFlashTimer = 0;
+    obstacles = [];
+    particles = [];
+    roadOffset = 0;
+    bgOffset = 0;
+    railScrapeTimer = 0;
+    railScrapeSide = 0;
+    wallScrapeSoundTimer = 0;
+    score = 0;
+    distance = 0;
+    speed = 0;
+    raceTime = 0;
+    speedPenaltyKmh = 0;
+    recoveryTargetKmh = 0;
+    nitro = 100;
+    nitroActive = false;
+    spawnTimer = 0;
+    difficulty = 1;
+    shakeTimer = 0;
+    pickups = [];
+    floatingTexts = [];
+    combo = 0;
+    comboTimer = 0;
+    scoreMultiplier = 1;
+    speedBoostTimer = 0;
+    themeBannerTimer = 3.2;
+    pickupSpawnTimer = 2.5;
+    driftSparkTimer = 0;
+    showLegend = true;
+    lastTime = performance.now();
+    initRoadCurve();
+    initRain();
+    initAudio();
+    playEngineSound(activeCar);
+  }
+
+  function gameOver() {
+    state = STATE.GAMEOVER;
+    stopEngineSound();
+    playCrashSound();
+    document.getElementById('final-score').textContent = Math.floor(score).toLocaleString();
+    document.getElementById('final-distance').textContent = Math.floor(distance).toLocaleString();
+    const panel = document.getElementById('game-over-screen');
+    panel.classList.remove('hidden');
+    panel.classList.add('active');
+    shakeTimer = 20;
+  }
+
+  function initRain() {
+    rainDrops = [];
+    for (let i = 0; i < 120; i++) {
+      rainDrops.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        speed: 8 + Math.random() * 12,
+        len: 10 + Math.random() * 20,
+        opacity: 0.1 + Math.random() * 0.3,
+      });
+    }
+  }
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  let engineOsc = null;
+  let engineOsc2 = null;
+  let engineGain = null;
+  let engineFilter = null;
+  let engineNodes = [];
+
+  function stopEngineSound() {
+    engineNodes.forEach((node) => {
+      try { node.stop(); } catch (_) {}
+      try { node.disconnect(); } catch (_) {}
+    });
+    engineNodes = [];
+    engineOsc = null;
+    engineOsc2 = null;
+    engineGain = null;
+    engineFilter = null;
+  }
+
+  function playEngineSound(car) {
+    if (!audioCtx) return;
+    stopEngineSound();
+    const e = car.engine;
+
+    engineGain = audioCtx.createGain();
+    engineFilter = audioCtx.createBiquadFilter();
+    engineFilter.type = 'lowpass';
+    engineFilter.frequency.value = e.filter * ENGINE_FILTER_SCALE;
+    engineFilter.Q.value = 1.1;
+    engineFilter.connect(engineGain);
+    engineGain.connect(audioCtx.destination);
+    engineGain.gain.value = e.volume;
+
+    engineOsc = audioCtx.createOscillator();
+    engineOsc.type = e.wave;
+    engineOsc.frequency.value = e.baseFreq * ENGINE_PITCH_SCALE;
+    engineOsc.connect(engineFilter);
+    engineOsc.start();
+    engineNodes.push(engineOsc);
+
+    if (e.harmonic) {
+      engineOsc2 = audioCtx.createOscillator();
+      engineOsc2.type = e.harmonicWave || 'square';
+      engineOsc2.frequency.value = e.harmonic * ENGINE_PITCH_SCALE;
+      const harmGain = audioCtx.createGain();
+      harmGain.gain.value = e.harmonicVol || 0.012;
+      engineOsc2.connect(harmGain);
+      harmGain.connect(engineFilter);
+      engineOsc2.start();
+      engineNodes.push(engineOsc2);
+    }
+  }
+
+  function previewEngineSound() {
+    const car = CAR_TYPES[selectedCarIndex];
+    playEngineSound(car);
+    setTimeout(() => {
+      if (state === STATE.TITLE) stopEngineSound();
+    }, 450);
+  }
+
+  function updateEngineSound() {
+    if (!engineOsc || !activeCar) return;
+    const e = activeCar.engine;
+    const targetFreq = (e.baseFreq + speed * e.freqScale + (nitroActive ? e.nitroBoost : 0)) * ENGINE_PITCH_SCALE;
+    engineOsc.frequency.value += (targetFreq - engineOsc.frequency.value) * 0.12;
+    if (engineOsc2) {
+      const harmTarget = ((e.harmonic || e.baseFreq * 2) + speed * e.freqScale * 1.5) * ENGINE_PITCH_SCALE;
+      engineOsc2.frequency.value += (harmTarget - engineOsc2.frequency.value) * 0.1;
+    }
+    if (engineFilter) {
+      const filterTarget = e.filter * ENGINE_FILTER_SCALE + speed * e.freqScale * 2.2;
+      engineFilter.frequency.value += (filterTarget - engineFilter.frequency.value) * 0.08;
+    }
+    if (engineGain) {
+      const targetVol = nitroActive ? e.nitroVolume : e.volume;
+      engineGain.gain.value += (targetVol - engineGain.gain.value) * 0.1;
+    }
+  }
+
+  function playWallScrapeSound() {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    const impact = Math.min(1, speedToKmh(speed) / 180);
+    const vol = 0.14 + impact * 0.16;
+
+    const thud = audioCtx.createOscillator();
+    const thudGain = audioCtx.createGain();
+    thud.type = 'square';
+    thud.frequency.setValueAtTime(95 + impact * 45, now);
+    thud.frequency.exponentialRampToValueAtTime(28, now + 0.08);
+    thudGain.gain.setValueAtTime(vol * 0.85, now);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    thud.connect(thudGain);
+    thudGain.connect(audioCtx.destination);
+    thud.start(now);
+    thud.stop(now + 0.1);
+
+    const noise = audioCtx.createBufferSource();
+    const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.16, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    noise.buffer = buffer;
+
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(680 + impact * 420, now);
+    filter.frequency.exponentialRampToValueAtTime(120, now + 0.15);
+    filter.Q.value = 3.2;
+
+    const scrapeOsc = audioCtx.createOscillator();
+    scrapeOsc.type = 'sawtooth';
+    scrapeOsc.frequency.setValueAtTime(140 + impact * 80, now);
+    scrapeOsc.frequency.exponentialRampToValueAtTime(36, now + 0.16);
+
+    const mixGain = audioCtx.createGain();
+    mixGain.gain.setValueAtTime(vol, now);
+    mixGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+    noise.connect(filter);
+    scrapeOsc.connect(filter);
+    filter.connect(mixGain);
+    mixGain.connect(audioCtx.destination);
+
+    noise.start(now);
+    noise.stop(now + 0.16);
+    scrapeOsc.start(now);
+    scrapeOsc.stop(now + 0.16);
+  }
+
+  function playHitSound() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(140, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(90, audioCtx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.18);
+  }
+
+  function playCrashSound() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.4);
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.5);
+  }
+
+  function playPassSound() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 600;
+    gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.15);
+  }
+
+  function playNearMissSound() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.07, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.18);
+  }
+
+  function playPickupSound() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(520, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1040, audioCtx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.2);
+  }
+
+  function addFloatingText(x, y, text, color) {
+    floatingTexts.push({ x, y, text, color, life: 1, vy: -1.2 });
+  }
+
+  function grantPickupInvuln() {
+    playerInvulnTimer = Math.max(playerInvulnTimer, 0.75);
+  }
+
+  function tryRestoreHitPoint() {
+    if (hitPoints >= MAX_HIT_POINTS) return false;
+    hitPoints += 1;
+    addFloatingText(player.x, player.y - 36, '+1 HP', '#7fff9f');
+    return true;
+  }
+
+  function collectPickup(pickup) {
+    if (pickup.type === 'nitro') {
+      nitro = Math.min(100, nitro + 35);
+      addFloatingText(player.x, player.y - 20, '+NITRO', '#00f0ff');
+    } else if (pickup.type === 'repair') {
+      if (tryRestoreHitPoint()) {
+        /* healed */
+      } else {
+        const bonus = Math.floor(180 * difficulty * scoreMultiplier);
+        score += bonus;
+        addFloatingText(player.x, player.y - 20, `+${bonus}`, '#7fff9f');
+      }
+    } else {
+      combo = Math.min(10, combo + 1);
+      comboTimer = 4;
+      if (tryRestoreHitPoint()) {
+        score += 120 * difficulty * scoreMultiplier;
+        addFloatingText(player.x, player.y - 20, 'BOOST!', '#ffe14d');
+      } else {
+        const bonus = Math.floor(280 * difficulty * scoreMultiplier);
+        score += bonus;
+        addFloatingText(player.x, player.y - 20, `+${bonus}`, '#ffe14d');
+      }
+    }
+    grantPickupInvuln();
+    playPickupSound();
+    pickup.collected = true;
+  }
+
+  function spawnPickup() {
+    const lane = Math.floor(Math.random() * LANE_COUNT);
+    const laneFraction = laneFractionAt(lane);
+    const spawnY = -50;
+    const centerY = spawnY + 20;
+    const roll = Math.random();
+    let type = 'boost';
+    if (hitPoints < MAX_HIT_POINTS && roll < 0.38) {
+      type = 'repair';
+    } else if (roll < 0.72) {
+      type = 'nitro';
+    }
+    pickups.push({
+      lane,
+      laneFraction,
+      x: laneXFromFraction(centerY, laneFraction),
+      y: spawnY,
+      type,
+      spin: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function spawnDriftSparks() {
+    const side = getSteerInput() || (player.x - player.prevX > 0 ? 1 : -1);
+    for (let i = 0; i < 4; i++) {
+      particles.push({
+        x: player.x + side * player.width * 0.35,
+        y: player.y + player.height * 0.7,
+        vx: side * (1 + Math.random() * 2),
+        vy: 1 + Math.random() * 2,
+        life: 1,
+        decay: 0.05 + Math.random() * 0.04,
+        color: '#9ecbff',
+        size: 2 + Math.random() * 3,
+      });
+    }
+  }
+
+  function getSteerInput() {
+    let input = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) input -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) input += 1;
+    return input;
+  }
+
+  function carsOverlap(a, b) {
+    const dx = Math.abs(a.x - b.x);
+    const dy = Math.abs(a.y + a.height * 0.3 - (b.y + b.height * 0.3));
+    return dx < (a.width + b.width) * 0.35 && dy < (a.height + b.height) * 0.3;
+  }
+
+  function overlapDepth(a, b) {
+    const dx = Math.abs(a.x - b.x);
+    const dy = Math.abs(a.y + a.height * 0.3 - (b.y + b.height * 0.3));
+    return {
+      x: (a.width + b.width) * 0.35 - dx,
+      y: (a.height + b.height) * 0.3 - dy,
+    };
+  }
+
+  function applyBounceDamping(value, dt) {
+    return value * Math.pow(BOUNCE_DAMPING, dt * 60);
+  }
+
+  function bounceCars(a, b, depth, currentSpeed) {
+    const midX = (a.x + b.x) * 0.5;
+    const midY = (a.y + b.y + a.height * 0.3 + b.height * 0.3) * 0.25;
+
+    if (depth.x < depth.y) {
+      const push = depth.x * 0.58;
+      const dir = a.x < b.x ? -1 : 1;
+      a.x -= push * dir;
+      b.x += push * dir;
+      const impulse = BOUNCE_STRENGTH;
+      if ('vx' in a) a.vx = (a.vx || 0) - impulse * dir;
+      if ('vx' in b) b.vx = (b.vx || 0) + impulse * dir;
+    } else {
+      const push = depth.y * 0.58;
+      const dir = a.y < b.y ? -1 : 1;
+      a.y -= push * dir;
+      b.y += push * dir;
+      const impulse = BOUNCE_STRENGTH * 0.7;
+      if ('vy' in a) a.vy = (a.vy || 0) - impulse * dir;
+      if ('vy' in b) b.vy = (b.vy || 0) + impulse * dir;
+
+      if (a.speed !== undefined && b.speed !== undefined && currentSpeed !== undefined) {
+        const aScreenVel = currentSpeed - a.speed;
+        const bScreenVel = currentSpeed - b.speed;
+        const exchange = 0.18;
+        const trafficCap = maxTrafficSpeed(currentSpeed);
+        if (aScreenVel > bScreenVel) {
+          a.speed = Math.min(a.speed + exchange, trafficCap);
+          b.speed = Math.max(b.speed - exchange * 0.6, kmhToSpeed(TRAFFIC_KMH_MIN));
+        } else if (bScreenVel > aScreenVel) {
+          b.speed = Math.min(b.speed + exchange, trafficCap);
+          a.speed = Math.max(a.speed - exchange * 0.6, kmhToSpeed(TRAFFIC_KMH_MIN));
+        }
+        if (a.speed !== undefined) clampTrafficSpeed(a, currentSpeed);
+        if (b.speed !== undefined) clampTrafficSpeed(b, currentSpeed);
+      }
+    }
+
+    return { midX, midY };
+  }
+
+  function damagePlayer(obs, currentSpeed) {
+    if (playerInvulnTimer > 0) return false;
+
+    const depth = overlapDepth(player, obs);
+    if (depth.x <= 0 || depth.y <= 0) return false;
+
+    const { midX, midY } = bounceCars(player, obs, depth, currentSpeed);
+    const pushDir = player.x < obs.x ? -1 : 1;
+    player.vx += pushDir * BOUNCE_STRENGTH * 1.4;
+    obs.vx = (obs.vx || 0) - pushDir * BOUNCE_STRENGTH * 0.8;
+
+    hitPoints -= 1;
+    playerInvulnTimer = PLAYER_HIT_INVULN;
+    hitFlashTimer = PLAYER_HIT_INVULN;
+
+    spawnCollisionParticles(midX, midY);
+    shakeTimer = Math.max(shakeTimer, 10);
+    applySpeedPenalty(28);
+    penalizeRaceProgress(2.2);
+    combo = 0;
+    comboTimer = 0;
+    playHitSound();
+    addFloatingText(player.x, player.y - 40, '-1 HP', '#ff2d95');
+    addFloatingText(player.x, player.y - 62, `${hitPoints} HP LEFT`, '#ffffff');
+
+    if (hitPoints <= 0) {
+      gameOver();
+    }
+    return true;
+  }
+
+  function resolvePlayerCollisions(currentSpeed) {
+    if (playerInvulnTimer > 0) return;
+    for (const obs of obstacles) {
+      if (!carsOverlap(player, obs)) continue;
+      if (damagePlayer(obs, currentSpeed)) return;
+    }
+  }
+
+  function updateCarAngle(car, lateralVel, forwardVel, steerInput, dt, roadLean = 0) {
+    const speedFactor = Math.min(1.15, Math.max(0.35, forwardVel / Math.max(kmhToSpeed(40), 0.5)));
+    const inputAngle = steerInput * MAX_CAR_ANGLE * speedFactor;
+    const velAngle = Math.atan2(lateralVel, Math.abs(forwardVel) * 55 + 2) * 0.75;
+    const targetAngle = Math.max(
+      -MAX_CAR_ANGLE,
+      Math.min(MAX_CAR_ANGLE, inputAngle * 0.65 + velAngle * 0.35 + roadLean)
+    );
+    const blend = Math.min(1, ANGLE_RESPONSIVENESS * dt);
+    car.angle += (targetAngle - car.angle) * blend;
+  }
+
+  function playerRoadLean() {
+    const lookAhead = 48;
+    const centerNow = roadCenterAtScreenY(player.y);
+    const centerAhead = roadCenterAtScreenY(player.y - lookAhead);
+    return Math.max(
+      -MAX_CAR_ANGLE * 0.45,
+      Math.min(MAX_CAR_ANGLE * 0.45, Math.atan2(centerAhead - centerNow, lookAhead) * 0.5)
+    );
+  }
+
+  function canSpawnTrafficAt(x, y, width, height) {
+    const minGap = height * TRAFFIC_MIN_GAP;
+    const spawnWorldY = obstacleWorldY({ y });
+    const minWorldGap = height * TRAFFIC_MIN_GAP * 2.4;
+    for (const obs of obstacles) {
+      if (Math.abs(obs.y - y) < minGap) return false;
+      if (Math.abs(obstacleWorldY(obs) - spawnWorldY) < minWorldGap) return false;
+      if (carsOverlap({ x, y, width, height }, obs)) return false;
+    }
+    return true;
+  }
+
+  function findClearSpawnLane(spawnY, width, height) {
+    const lanes = Array.from({ length: LANE_COUNT }, (_, i) => i);
+    for (let i = lanes.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [lanes[i], lanes[j]] = [lanes[j], lanes[i]];
+    }
+    for (const lane of lanes) {
+      const laneFraction = laneFractionAt(lane);
+      const centerY = spawnY + height * 0.52;
+      const x = laneXFromFraction(centerY, laneFraction);
+      if (canSpawnTrafficAt(x, spawnY, width, height)) return { lane, laneFraction, x };
+    }
+    return null;
+  }
+
+  function resolveTrafficCollisions(currentSpeed) {
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < obstacles.length; i++) {
+        for (let j = i + 1; j < obstacles.length; j++) {
+          const a = obstacles[i];
+          const b = obstacles[j];
+          if (!carsOverlap(a, b)) continue;
+
+          const depth = overlapDepth(a, b);
+          if (depth.x <= 0 || depth.y <= 0) continue;
+
+          const { midX, midY } = bounceCars(a, b, depth, currentSpeed);
+
+          const now = performance.now() / 1000;
+          if (!a.hitCooldown || now > a.hitCooldown) {
+            a.hitCooldown = now + TRAFFIC_COLLISION_COOLDOWN;
+            b.hitCooldown = now + TRAFFIC_COLLISION_COOLDOWN;
+            spawnCollisionParticles(midX, midY);
+          }
+        }
+      }
+    }
+
+    obstacles.forEach((obs) => {
+      const centerY = obs.y + obs.height * 0.52;
+      const laneX = laneXFromFraction(centerY, obs.laneFraction);
+      const maxDrift = obs.width * 0.22;
+      obs.x = Math.max(laneX - maxDrift, Math.min(laneX + maxDrift, obs.x));
+    });
+  }
+
+  function spawnObstacle(currentSpeed) {
+    const carType = pickTrafficCar();
+    const { width, height } = carType;
+    const traffic = randomTrafficSpeed(currentSpeed);
+    const spawnY = trafficSpawnScreenY(height, currentSpeed, traffic.speed);
+    if (spawnY >= player.y - height) return;
+
+    const spawn = findClearSpawnLane(spawnY, width, height);
+    if (!spawn) return;
+
+    obstacles.push({
+      lane: spawn.lane,
+      laneFraction: spawn.laneFraction,
+      x: spawn.x,
+      y: spawnY,
+      width,
+      height,
+      carType,
+      speed: traffic.speed,
+      kmh: traffic.kmh,
+      passed: false,
+      angle: 0,
+      prevX: spawn.x,
+      vx: 0,
+      vy: 0,
+      hitCooldown: 0,
+    });
+  }
+
+  function spawnExhaustParticles() {
+    if (animFrame % 3 !== 0) return;
+    const count = nitroActive ? 3 : 1;
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: player.x + (Math.random() - 0.5) * 30,
+        y: player.y + player.height * 0.5 + Math.random() * 20,
+        vx: (Math.random() - 0.5) * 2,
+        vy: 2 + Math.random() * 3 + (nitroActive ? 4 : 0),
+        life: 1,
+        decay: 0.03 + Math.random() * 0.03,
+        color: nitroActive
+          ? `hsl(${180 + Math.random() * 60}, 100%, 70%)`
+          : `hsl(${300 + Math.random() * 40}, 80%, 60%)`,
+        size: nitroActive ? 6 + Math.random() * 4 : 3 + Math.random() * 3,
+      });
+    }
+  }
+
+  function spawnCollisionParticles(x, y) {
+    for (let i = 0; i < 30; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const spd = 2 + Math.random() * 8;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd,
+        life: 1,
+        decay: 0.02 + Math.random() * 0.02,
+        color: Math.random() > 0.5 ? '#ff2d95' : '#00f0ff',
+        size: 4 + Math.random() * 6,
+      });
+    }
+  }
+
+  function handleInput(dt) {
+    const steer = STEER_BASE * activeCar.steerMult * dt * 60;
+    const steerInput = getSteerInput();
+    if (steerInput < 0) player.x -= steer;
+    if (steerInput > 0) player.x += steer;
+    clampPlayerToRoad();
+
+    nitroActive = state === STATE.PLAYING && (keys[' '] || keys['Space']) && nitro > 0;
+    if (nitroActive) {
+      nitro = Math.max(0, nitro - activeCar.nitroDrain);
+    } else {
+      nitro = Math.min(100, nitro + activeCar.nitroRecharge);
+    }
+  }
+
+  function updateCountdown(dt) {
+    handleInput(dt);
+    player.x += player.vx * dt * 60;
+    player.vx = applyBounceDamping(player.vx, dt);
+    clampPlayerToRoad();
+    animFrame++;
+
+    const steerInput = getSteerInput();
+    const lateralVel = (player.x - player.prevX) / Math.max(dt, 0.001);
+    updateCarAngle(player, lateralVel, kmhToSpeed(LAUNCH_SPEED_KMH), steerInput, dt, playerRoadLean());
+    player.prevX = player.x;
+
+    countdownTimer -= dt;
+    if (countdownTimer <= 0) {
+      state = STATE.PLAYING;
+      countdownTimer = 0;
+      lastTime = performance.now();
+    }
+  }
+
+  function update(dt) {
+    if (state === STATE.COUNTDOWN) {
+      updateCountdown(dt);
+      return;
+    }
+    if (state !== STATE.PLAYING) return;
+
+    handleInput(dt);
+    player.x += player.vx * dt * 60;
+    player.vx = applyBounceDamping(player.vx, dt);
+    clampPlayerToRoad();
+    animFrame++;
+
+    if (speedBoostTimer > 0) speedBoostTimer -= dt;
+    const playerWy = worldYAtScreenY(player.y);
+    if (isOnSpeedStrip(playerWy) && !nitroActive) {
+      speedBoostTimer = Math.max(speedBoostTimer, 0.35);
+    }
+    updatePlayerSpeed(dt);
+
+    const currentSpeed = speed * (nitroActive ? activeCar.nitroMult : 1);
+    const steerInput = getSteerInput();
+    const lateralVel = (player.x - player.prevX) / Math.max(dt, 0.001);
+    updateCarAngle(player, lateralVel, currentSpeed, steerInput, dt, playerRoadLean());
+    player.prevX = player.x;
+    roadOffset += currentSpeed;
+    bgOffset += currentSpeed * 0.3;
+    ensureRoadCurveUpTo(roadOffset + H + 4000);
+
+    if (railScrapeTimer > 0) railScrapeTimer -= dt;
+    if (wallScrapeSoundTimer > 0) wallScrapeSoundTimer -= dt;
+    if (playerInvulnTimer > 0) playerInvulnTimer -= dt;
+    if (hitFlashTimer > 0) hitFlashTimer -= dt;
+    if (comboTimer > 0) {
+      comboTimer -= dt;
+      if (comboTimer <= 0) combo = 0;
+    }
+    if (themeBannerTimer > 0) themeBannerTimer -= dt;
+
+    scoreMultiplier = 1 + combo * 0.15 + (speedBoostTimer > 0 ? 0.5 : 0);
+
+    if (Math.abs(steerInput) > 0 && speedToKmh(currentSpeed) > LAUNCH_SPEED_KMH * 0.85) {
+      driftSparkTimer += dt;
+      if (driftSparkTimer > 0.06) {
+        driftSparkTimer = 0;
+        spawnDriftSparks();
+      }
+    }
+
+    distance += currentSpeed * 0.5;
+    score += currentSpeed * 0.1 * difficulty * scoreMultiplier;
+    difficulty = 1 + distance / DIFFICULTY_RAMP_DISTANCE;
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0 && speedToKmh(currentSpeed) >= LAUNCH_SPEED_KMH * 0.7) {
+      spawnObstacle(currentSpeed);
+      spawnTimer = Math.max(0.6, 2.2 - difficulty * 0.3) * (0.7 + Math.random() * 0.6);
+    }
+
+    pickupSpawnTimer -= dt;
+    if (pickupSpawnTimer <= 0) {
+      spawnPickup();
+      pickupSpawnTimer = 4 + Math.random() * 5;
+    }
+
+    pickups.forEach((pickup) => {
+      pickup.y += currentSpeed;
+      pickup.spin += dt * 4;
+      const centerY = pickup.y + 16;
+      pickup.x = laneXFromFraction(centerY, pickup.laneFraction);
+
+      const dx = Math.abs(player.x - pickup.x);
+      const dy = Math.abs(player.y + player.height * 0.4 - pickup.y);
+      if (dx < player.width * 0.45 && dy < player.height * 0.45) {
+        collectPickup(pickup);
+      }
+    });
+    pickups = pickups.filter((pickup) => !pickup.collected && pickup.y < H + 40);
+
+    obstacles.forEach((obs) => {
+      clampTrafficSpeed(obs, currentSpeed);
+      obs.prevX = obs.x;
+      obs.x += (obs.vx || 0) * dt * 60;
+      const relativeSpeed = Math.max(0.5, currentSpeed - obs.speed);
+      obs.y += relativeSpeed + (obs.vy || 0) * dt * 60;
+      obs.vx = applyBounceDamping(obs.vx || 0, dt);
+      obs.vy = applyBounceDamping(obs.vy || 0, dt);
+      const centerY = obs.y + obs.height * 0.52;
+      const targetX = laneXFromFraction(centerY, obs.laneFraction);
+      const laneBlend = Math.min(1, TRAFFIC_LANE_SMOOTH * dt);
+      obs.x += (targetX - obs.x) * laneBlend;
+
+      const forwardVel = Math.abs(currentSpeed - obs.speed) + 0.5;
+      const lateralVel = (obs.x - obs.prevX) / Math.max(dt, 0.001);
+      const steerHint = Math.max(-1, Math.min(1, lateralVel / (forwardVel * 28)));
+      updateCarAngle(obs, lateralVel, forwardVel, steerHint, dt);
+
+      if (!obs.passed && obs.y + obs.height * 0.5 > player.y + player.height * 0.5) {
+        obs.passed = true;
+        const passDx = Math.abs(player.x - obs.x);
+        const passThreshold = (player.width + obs.width) * 0.38;
+        const nearMiss = passDx < passThreshold && passDx > (player.width + obs.width) * 0.3;
+        combo = Math.min(10, combo + 1);
+        comboTimer = 4;
+        score += 100 * difficulty * scoreMultiplier;
+        if (nearMiss) {
+          score += 80 * difficulty * scoreMultiplier;
+          playNearMissSound();
+          addFloatingText(player.x, player.y - 30, 'NEAR MISS!', '#ff6eb4');
+          shakeTimer = Math.max(shakeTimer, 6);
+        } else {
+          playPassSound();
+        }
+      }
+    });
+
+    resolveTrafficCollisions(currentSpeed);
+    resolvePlayerCollisions(currentSpeed);
+
+    obstacles = obstacles.filter((obs) => {
+      if (obs.y < -obs.height - TRAFFIC_CULL_ABOVE) return false;
+      if (obs.y > H + 120) return false;
+      if (!obs.passed && isTrafficBehind(obs)) return false;
+      return true;
+    });
+    if (state !== STATE.PLAYING) return;
+
+    spawnExhaustParticles();
+
+    particles.forEach((p) => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+    });
+    particles = particles.filter((p) => p.life > 0);
+
+    const rainIntensity = activeTheme ? activeTheme.rain || 0 : 0.5;
+    rainDrops.forEach((drop) => {
+      drop.y += (drop.speed + currentSpeed * 0.5) * (0.5 + rainIntensity);
+      drop.x -= 1 + rainIntensity;
+      if (drop.y > H) { drop.y = -20; drop.x = Math.random() * W; }
+      if (drop.x < 0) drop.x = W;
+    });
+
+    if (themeParticles.length && window.updateThemeParticles) {
+      window.updateThemeParticles(themeParticles, W, H, currentSpeed * 0.02, dt);
+    }
+
+    floatingTexts.forEach((ft) => {
+      ft.y += ft.vy;
+      ft.life -= dt * 0.9;
+    });
+    floatingTexts = floatingTexts.filter((ft) => ft.life > 0);
+
+    updateEngineSound();
+  }
+
+  function drawBackground() {
+    if (activeTheme && window.drawThemeBackground) {
+      const bgImg = images[`bg-${activeTheme.id}`] || null;
+      window.drawThemeBackground(ctx, W, H, bgOffset, activeTheme, bgImg);
+      if (activeTheme.drawParticles && themeParticles.length) {
+        activeTheme.drawParticles(ctx, themeParticles);
+      }
+    } else {
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, '#0a0618');
+      grad.addColorStop(1, '#1a1040');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  function drawGuardRails(points, side) {
+    const offset = side === 'left' ? -GUARD_RAIL_WIDTH - 2 : GUARD_RAIL_WIDTH + 2;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(210, 220, 235, 0.85)';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#8be9ff';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const x = p.x + offset;
+      if (i === 0) ctx.moveTo(x, p.y);
+      else ctx.lineTo(x, p.y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(180, 190, 205, 0.9)';
+    for (let i = 0; i < points.length; i += 14) {
+      const p = points[i];
+      const x = p.x + offset;
+      ctx.fillRect(x - 2, p.y, 4, 10);
+      if (i % 28 === 0) {
+        ctx.fillStyle = railScrapeTimer > 0 && railScrapeSide === (side === 'left' ? -1 : 1)
+          ? '#ffe14d'
+          : 'rgba(255, 225, 77, 0.75)';
+        ctx.beginPath();
+        ctx.arc(x, p.y + 5, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(180, 190, 205, 0.9)';
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawSpeedStrips() {
+    for (let y = 0; y <= H; y += ROAD_STEP) {
+      const wy = worldYAtScreenY(y);
+      if (!isOnSpeedStrip(wy)) continue;
+      const bounds = roadBoundsAtScreenY(y);
+      const pulse = 0.25 + Math.sin(wy * 0.08 + animFrame * 0.12) * 0.15;
+      ctx.fillStyle = `rgba(80, 255, 160, ${pulse})`;
+      ctx.fillRect(bounds.left + 8, y, ROAD_WIDTH - 16, ROAD_STEP + 0.5);
+    }
+  }
+
+  function drawTunnel() {
+    const playerWy = worldYAtScreenY(player.y);
+    if (!isInTunnel(playerWy)) return;
+
+    ctx.save();
+    const vignette = ctx.createRadialGradient(W / 2, H * 0.55, H * 0.15, W / 2, H * 0.55, H * 0.85);
+    vignette.addColorStop(0, 'rgba(4, 6, 14, 0.35)');
+    vignette.addColorStop(1, 'rgba(2, 3, 10, 0.78)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function drawPickups() {
+    pickups.forEach((pickup) => {
+      ctx.save();
+      ctx.translate(pickup.x, pickup.y);
+      ctx.rotate(pickup.spin);
+      if (pickup.type === 'nitro') {
+        ctx.fillStyle = '#00f0ff';
+        ctx.shadowColor = '#00f0ff';
+      } else if (pickup.type === 'repair') {
+        ctx.fillStyle = '#7fff9f';
+        ctx.shadowColor = '#7fff9f';
+      } else {
+        ctx.fillStyle = '#ffe14d';
+        ctx.shadowColor = '#ffe14d';
+      }
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(0, 0, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 10px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const label = pickup.type === 'nitro' ? 'N' : pickup.type === 'repair' ? 'HP' : '+';
+      ctx.fillText(label, 0, 1);
+      ctx.restore();
+    });
+  }
+
+  function drawFloatingTexts() {
+    floatingTexts.forEach((ft) => {
+      ctx.globalAlpha = ft.life;
+      ctx.font = '700 16px Orbitron, sans-serif';
+      ctx.fillStyle = ft.color;
+      ctx.shadowColor = ft.color;
+      ctx.shadowBlur = 10;
+      ctx.textAlign = 'center';
+      ctx.fillText(ft.text, ft.x, ft.y);
+      ctx.shadowBlur = 0;
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function drawThemeBanner() {
+    if (!activeTheme || themeBannerTimer <= 0) return;
+    const alpha = Math.min(1, themeBannerTimer);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const panelW = 420;
+    const panelH = 72;
+    const x = (W - panelW) / 2;
+    const y = 110;
+    drawHudPanel(x, y, panelW, panelH, 'rgba(0, 240, 255, 0.5)');
+    ctx.textAlign = 'center';
+    ctx.font = '700 22px Orbitron, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(activeTheme.name, W / 2, y + 30);
+    ctx.font = '600 13px Rajdhani, sans-serif';
+    ctx.fillStyle = '#8be9ff';
+    ctx.fillText(activeTheme.subtitle, W / 2, y + 52);
+    ctx.restore();
+  }
+
+  function collectRoadPoints() {
+    const leftEdge = [];
+    const rightEdge = [];
+    const laneLines = Array.from({ length: LANE_COUNT - 1 }, () => []);
+    for (let y = 0; y <= H; y += ROAD_STEP) {
+      const bounds = roadBoundsAtScreenY(y);
+      leftEdge.push({ x: bounds.left, y });
+      rightEdge.push({ x: bounds.right, y });
+      for (let i = 1; i < LANE_COUNT; i++) {
+        laneLines[i - 1].push({ x: bounds.left + (ROAD_WIDTH * i) / LANE_COUNT, y });
+      }
+    }
+    return { leftEdge, rightEdge, laneLines };
+  }
+
+  function drawRoadEdges(points, glow, dashed) {
+    ctx.strokeStyle = glow ? 'rgba(255, 45, 149, 0.65)' : 'rgba(255, 255, 255, 0.22)';
+    ctx.lineWidth = glow ? 3 : 1.5;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.shadowColor = glow ? '#ff2d95' : 'transparent';
+    ctx.shadowBlur = glow ? 14 : 0;
+    if (dashed) {
+      ctx.setLineDash([18, 20]);
+      ctx.lineDashOffset = -roadOffset;
+    } else {
+      ctx.setLineDash([]);
+    }
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    points.forEach((p) => ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+    ctx.shadowBlur = 0;
+  }
+
+  function drawRoadSurface() {
+    for (let y = 0; y <= H; y += ROAD_STEP) {
+      const bounds = roadBoundsAtScreenY(y);
+      const wy = worldYAtScreenY(y);
+      const grain = Math.sin(wy * 0.014) * 2.5 + Math.sin(wy * 0.067 + 0.8) * 1.5;
+      const wet = Math.sin(wy * 0.031 + roadOffset * 0.06) * 4;
+      const base = 19 + grain + wet * 0.25;
+      ctx.fillStyle = `rgb(${base | 0}, ${(base + 2) | 0}, ${(base + 11) | 0})`;
+      ctx.fillRect(bounds.left, y, ROAD_WIDTH, ROAD_STEP + 0.5);
+
+      const shimmer = (Math.sin(wy * 0.022 + roadOffset * 0.04) + 1) * 0.5;
+      if (shimmer > 0.82) {
+        ctx.fillStyle = `rgba(90, 170, 210, ${(shimmer - 0.82) * 0.35})`;
+        ctx.fillRect(bounds.left + ROAD_WIDTH * 0.08, y, ROAD_WIDTH * 0.84, ROAD_STEP + 0.5);
+      }
+    }
+
+    const edgeInset = 5;
+    for (let y = 0; y <= H; y += ROAD_STEP) {
+      const bounds = roadBoundsAtScreenY(y);
+      const wy = worldYAtScreenY(y);
+      const edgePhase = wy % 44;
+      if (edgePhase < 22) {
+        ctx.fillStyle = 'rgba(255, 225, 77, 0.45)';
+        ctx.fillRect(bounds.left + edgeInset, y, 3, ROAD_STEP + 0.5);
+        ctx.fillRect(bounds.right - edgeInset - 3, y, 3, ROAD_STEP + 0.5);
+      }
+    }
+  }
+
+  function drawRoad() {
+    ctx.save();
+    buildRoadClipPath();
+    ctx.clip();
+    drawRoadSurface();
+    drawSpeedStrips();
+    ctx.restore();
+
+    const { leftEdge, rightEdge, laneLines } = collectRoadPoints();
+    drawGuardRails(leftEdge, 'left');
+    drawGuardRails(rightEdge, 'right');
+    drawRoadEdges(leftEdge, true, false);
+    drawRoadEdges(rightEdge, true, false);
+    laneLines.forEach((line) => drawRoadEdges(line, false, true));
+
+    drawTunnel();
+
+    if (railScrapeTimer > 0) {
+      ctx.fillStyle = `rgba(255, 225, 77, ${railScrapeTimer * 1.8})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  function drawSprite(img, x, y, width, height, glowColor, flipVertical = false, angle = 0) {
+    ctx.save();
+    if (glowColor) {
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur = 14;
+    }
+    const aspect = img.width / img.height;
+    let drawW = width;
+    let drawH = height;
+    if (aspect > width / height) {
+      drawH = width / aspect;
+    } else {
+      drawW = height * aspect;
+    }
+    const centerY = y + height / 2;
+    ctx.translate(x, centerY);
+    if (flipVertical) ctx.scale(1, -1);
+    if (angle) ctx.rotate(angle);
+    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.restore();
+  }
+
+  function drawObstacles() {
+    obstacles.forEach((obs) => {
+      if (obs.y + obs.height < -8) return;
+
+      const enterFade = Math.min(1, (obs.y + obs.height) / 90);
+      if (enterFade <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = enterFade;
+      const img = images[obs.carType.id];
+      drawSprite(img, obs.x, obs.y, obs.width, obs.height, obs.carType.glow, false, obs.angle || 0);
+      ctx.restore();
+    });
+  }
+
+  function drawPlayer() {
+    const img = images[activeCar.id];
+    const glow = nitroActive ? '#ffffff' : activeCar.glow;
+    const scale = nitroActive ? 1.05 : 1;
+    if (hitFlashTimer > 0) {
+      ctx.globalAlpha = 0.45 + Math.sin(animFrame * 0.5) * 0.25;
+    }
+    drawSprite(
+      img,
+      player.x,
+      player.y,
+      player.width * scale,
+      player.height * scale,
+      glow,
+      false,
+      player.angle
+    );
+    ctx.globalAlpha = 1;
+  }
+
+  function drawLegendSwatch(type, x, y, w, h) {
+    ctx.save();
+    if (type === 'edge-neon') {
+      ctx.fillStyle = '#14101f';
+      roundRect(ctx, x, y, w, h, 3);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 45, 149, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#ff2d95';
+      ctx.shadowBlur = 6;
+      roundRect(ctx, x + 1, y + 1, w - 2, h - 2, 2);
+      ctx.stroke();
+    } else if (type === 'lane-dash') {
+      ctx.fillStyle = '#14141f';
+      roundRect(ctx, x, y, w, h, 3);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(x + 4, y + h / 2);
+      ctx.lineTo(x + w - 4, y + h / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (type === 'edge-stud') {
+      ctx.fillStyle = '#1a1a28';
+      roundRect(ctx, x, y, w, h, 3);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 225, 77, 0.85)';
+      ctx.fillRect(x + 4, y + 3, 4, h - 6);
+      ctx.fillRect(x + 14, y + 5, 4, h - 8);
+    } else if (type === 'speed-strip') {
+      ctx.fillStyle = 'rgba(80, 255, 160, 0.45)';
+      roundRect(ctx, x, y, w, h, 3);
+      ctx.fill();
+    } else if (type === 'guard-rail') {
+      ctx.fillStyle = '#12141c';
+      roundRect(ctx, x, y, w, h, 3);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(210, 220, 235, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + w / 2, y + 2);
+      ctx.lineTo(x + w / 2, y + h - 2);
+      ctx.stroke();
+    } else if (type === 'orb-nitro') {
+      ctx.fillStyle = '#00f0ff';
+      ctx.shadowColor = '#00f0ff';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y + h / 2, w * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fff';
+      ctx.font = '700 8px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('N', x + w / 2, y + h / 2 + 1);
+    } else if (type === 'orb-repair') {
+      ctx.fillStyle = '#7fff9f';
+      ctx.shadowColor = '#7fff9f';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y + h / 2, w * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fff';
+      ctx.font = '700 7px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('HP', x + w / 2, y + h / 2 + 1);
+    } else if (type === 'orb-boost') {
+      ctx.fillStyle = '#ffe14d';
+      ctx.shadowColor = '#ffe14d';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y + h / 2, w * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#222';
+      ctx.font = '700 9px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('+', x + w / 2, y + h / 2 + 1);
+    } else if (type === 'hp-dots') {
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = '#ff2d95';
+        ctx.shadowColor = '#ff2d95';
+        ctx.shadowBlur = 5;
+        ctx.beginPath();
+        ctx.arc(x + 6 + i * 10, y + h / 2, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawLegend() {
+    const panelW = 280;
+    const rowH = 17;
+    const headerH = 22;
+    const sectionGap = 8;
+    const roadRows = 5;
+    const pickupRows = 5;
+    const panelH = headerH + roadRows * rowH + sectionGap + 14 + pickupRows * rowH + 12;
+    const x = 14;
+    const y = 172;
+
+    ctx.save();
+    drawHudPanel(x, y, panelW, panelH, 'rgba(0, 240, 255, 0.35)');
+
+    ctx.textAlign = 'left';
+    ctx.font = '700 10px Orbitron, sans-serif';
+    ctx.fillStyle = '#00f0ff';
+    ctx.fillText('SYMBOL LEGEND', x + 14, y + 16);
+    ctx.font = '600 8px Orbitron, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.textAlign = 'right';
+    ctx.fillText('press L', x + panelW - 14, y + 16);
+    ctx.textAlign = 'left';
+
+    const roadItems = [
+      { swatch: 'edge-neon', label: 'Neon edge — road boundary' },
+      { swatch: 'lane-dash', label: 'Dashed lines — lane dividers' },
+      { swatch: 'edge-stud', label: 'Yellow studs — edge markers' },
+      { swatch: 'speed-strip', label: 'Green strip — speed boost' },
+      { swatch: 'guard-rail', label: 'Guard rails — stay on road' },
+    ];
+
+    const pickupItems = [
+      { swatch: 'orb-nitro', label: 'N — nitro refill' },
+      { swatch: 'orb-repair', label: 'HP — +1 hit point' },
+      { swatch: 'orb-boost', label: '+ — score boost & +1 HP' },
+      { swatch: 'hp-dots', label: 'Pink dots — hit points' },
+      { swatch: 'edge-neon', label: 'Traffic — avoid (-1 HP)' },
+    ];
+
+    let rowY = y + headerH + 4;
+    ctx.font = '700 8px Orbitron, sans-serif';
+    ctx.fillStyle = '#ffe14d';
+    ctx.fillText('ROAD MARKINGS', x + 14, rowY);
+    rowY += 12;
+
+    ctx.font = '600 11px Rajdhani, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.82)';
+    roadItems.forEach((item) => {
+      drawLegendSwatch(item.swatch, x + 14, rowY - 9, 24, 12);
+      ctx.fillText(item.label, x + 44, rowY);
+      rowY += rowH;
+    });
+
+    rowY += sectionGap;
+    ctx.font = '700 8px Orbitron, sans-serif';
+    ctx.fillStyle = '#ffe14d';
+    ctx.fillText('PICKUPS & HUD', x + 14, rowY);
+    rowY += 12;
+
+    ctx.font = '600 11px Rajdhani, sans-serif';
+    pickupItems.forEach((item) => {
+      drawLegendSwatch(item.swatch, x + 14, rowY - 10, 22, 14);
+      ctx.fillText(item.label, x + 44, rowY);
+      rowY += rowH;
+    });
+
+    ctx.restore();
+  }
+
+  function drawHudCorners(x, y, w, h, color, len = 10) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 8, y + len + 8);
+    ctx.lineTo(x + 8, y + 8);
+    ctx.lineTo(x + len + 8, y + 8);
+    ctx.moveTo(x + w - len - 8, y + 8);
+    ctx.lineTo(x + w - 8, y + 8);
+    ctx.lineTo(x + w - 8, y + len + 8);
+    ctx.moveTo(x + 8, y + h - len - 8);
+    ctx.lineTo(x + 8, y + h - 8);
+    ctx.lineTo(x + len + 8, y + h - 8);
+    ctx.moveTo(x + w - len - 8, y + h - 8);
+    ctx.lineTo(x + w - 8, y + h - 8);
+    ctx.lineTo(x + w - 8, y + h - len - 8);
+    ctx.stroke();
+  }
+
+  function drawHitPointsHud() {
+    const panelW = 248;
+    const panelH = 54;
+    const x = W / 2 - panelW / 2;
+    const y = 10;
+    const accent = hitPoints <= 1 ? '#ff2d95' : '#7fff9f';
+
+    drawHudPanel(x, y, panelW, panelH, accent, { compact: true });
+
+    ctx.textAlign = 'left';
+    ctx.font = '700 9px Orbitron, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.fillText('ARMOR', x + 18, y + 18);
+
+    const segW = 52;
+    const segH = 10;
+    const segStartX = x + 18;
+    const segY = y + 26;
+    for (let i = 0; i < MAX_HIT_POINTS; i++) {
+      const filled = i < hitPoints;
+      const sx = segStartX + i * (segW + 8);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+      roundRect(ctx, sx, segY, segW, segH, 5);
+      ctx.fill();
+      if (filled) {
+        const hpGrad = ctx.createLinearGradient(sx, segY, sx + segW, segY);
+        hpGrad.addColorStop(0, '#ff2d95');
+        hpGrad.addColorStop(1, '#ff6eb4');
+        ctx.fillStyle = hpGrad;
+        ctx.shadowColor = '#ff2d95';
+        ctx.shadowBlur = 10;
+        roundRect(ctx, sx, segY, segW, segH, 5);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
+        roundRect(ctx, sx + 0.5, segY + 0.5, segW - 1, segH - 1, 5);
+        ctx.stroke();
+      }
+    }
+
+    ctx.textAlign = 'right';
+    const valueGrad = ctx.createLinearGradient(x + panelW - 80, y, x + panelW, y);
+    valueGrad.addColorStop(0, '#ffffff');
+    valueGrad.addColorStop(1, accent);
+    ctx.font = '700 24px Orbitron, sans-serif';
+    ctx.fillStyle = valueGrad;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 8;
+    ctx.fillText(`${hitPoints}`, x + panelW - 42, y + 38);
+    ctx.shadowBlur = 0;
+    ctx.font = '600 14px Rajdhani, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.fillText(`/ ${MAX_HIT_POINTS}`, x + panelW - 18, y + 38);
+  }
+
+  function drawParticles() {
+    particles.forEach((p) => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  function drawRain() {
+    ctx.strokeStyle = 'rgba(150, 200, 255, 0.3)';
+    ctx.lineWidth = 1;
+    rainDrops.forEach((drop) => {
+      ctx.globalAlpha = drop.opacity;
+      ctx.beginPath();
+      ctx.moveTo(drop.x, drop.y);
+      ctx.lineTo(drop.x - 3, drop.y + drop.len);
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHudPanel(x, y, w, h, accent, options = {}) {
+    const { compact = false } = options;
+    const radius = compact ? 8 : 12;
+    ctx.save();
+
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 16;
+    const shell = ctx.createLinearGradient(x, y, x + w, y + h);
+    shell.addColorStop(0, 'rgba(14, 16, 28, 0.94)');
+    shell.addColorStop(0.45, 'rgba(10, 12, 22, 0.9)');
+    shell.addColorStop(1, 'rgba(6, 8, 16, 0.96)');
+    ctx.fillStyle = shell;
+    roundRect(ctx, x, y, w, h, radius);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    const sheen = ctx.createLinearGradient(x, y, x, y + h * 0.55);
+    sheen.addColorStop(0, 'rgba(255, 255, 255, 0.09)');
+    sheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = sheen;
+    roundRect(ctx, x + 1, y + 1, w - 2, h * 0.5, radius - 1);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 1;
+    roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, radius);
+    ctx.stroke();
+
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 10;
+    roundRect(ctx, x + 1.5, y + 1.5, w - 3, h - 3, radius - 1);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    if (!compact) {
+      const barGrad = ctx.createLinearGradient(x + 16, y, x + w - 16, y);
+      barGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      barGrad.addColorStop(0.5, accent);
+      barGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = barGrad;
+      roundRect(ctx, x + 16, y + 8, w - 32, 2, 1);
+      ctx.fill();
+    }
+
+    drawHudCorners(x, y, w, h, accent, compact ? 7 : 11);
+    ctx.restore();
+  }
+
+  function drawHudStat(x, y, label, value, unit, accent, valueSize, panelW) {
+    ctx.textAlign = 'left';
+    ctx.font = '700 9px Orbitron, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fillText(label, x, y);
+
+    const valueY = y + valueSize + 6;
+    const valueGrad = ctx.createLinearGradient(x, valueY - valueSize, x + panelW, valueY);
+    valueGrad.addColorStop(0, '#ffffff');
+    valueGrad.addColorStop(1, accent);
+    ctx.font = `700 ${valueSize}px Orbitron, sans-serif`;
+    ctx.fillStyle = valueGrad;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 6;
+    ctx.fillText(value, x, valueY);
+    ctx.shadowBlur = 0;
+
+    if (unit) {
+      ctx.font = '600 12px Rajdhani, sans-serif';
+      ctx.fillStyle = accent;
+      const valueW = ctx.measureText(value).width;
+      ctx.globalAlpha = 0.85;
+      ctx.fillText(unit, x + valueW + 6, valueY - 4);
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(x, valueY + 6, Math.min(panelW - 24, valueSize * 2.2), 1);
+    ctx.globalAlpha = 1;
+  }
+
+  function drawNitroBar(x, y, w) {
+    const barX = x + 16;
+    const barY = y + 4;
+    const barW = w - 32;
+    const barH = 12;
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    roundRect(ctx, barX, barY, barW, barH, 6);
+    ctx.fill();
+
+    for (let i = 1; i < 5; i++) {
+      const tickX = barX + (barW * i) / 5;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(tickX, barY + 2);
+      ctx.lineTo(tickX, barY + barH - 2);
+      ctx.stroke();
+    }
+
+    const fillW = (barW * nitro) / 100;
+    if (fillW > 0) {
+      const nitroGrad = ctx.createLinearGradient(barX, barY, barX + barW, barY);
+      nitroGrad.addColorStop(0, '#00f0ff');
+      nitroGrad.addColorStop(0.55, '#6e7bff');
+      nitroGrad.addColorStop(1, '#ff2d95');
+      ctx.fillStyle = nitroGrad;
+      ctx.shadowColor = nitroActive ? '#ff2d95' : '#00f0ff';
+      ctx.shadowBlur = nitroActive ? 14 : 8;
+      roundRect(ctx, barX, barY, fillW, barH, 6);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      if (nitroActive) {
+        const shimmer = (Math.sin(animFrame * 0.25) + 1) * 0.5;
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.12 + shimmer * 0.18})`;
+        roundRect(ctx, barX, barY, fillW, barH * 0.45, 6);
+        ctx.fill();
+      }
+    }
+
+    ctx.textAlign = 'center';
+    ctx.font = '700 9px Orbitron, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.fillText('NITRO', x + w / 2, y - 8);
+    ctx.font = '600 10px Rajdhani, sans-serif';
+    ctx.fillStyle = nitroActive ? '#ff9fd0' : 'rgba(255,255,255,0.45)';
+    ctx.fillText(`${Math.floor(nitro)}%`, x + w / 2, barY + barH + 12);
+  }
+
+  function drawComboBadge() {
+    if (combo <= 1 && scoreMultiplier <= 1.01) return;
+
+    const badgeW = 148;
+    const badgeH = 38;
+    const x = W - badgeW - 16;
+    const y = 172;
+    drawHudPanel(x, y, badgeW, badgeH, '#ff6eb4', { compact: true });
+
+    ctx.textAlign = 'center';
+    if (combo > 1) {
+      ctx.font = '700 16px Orbitron, sans-serif';
+      const comboGrad = ctx.createLinearGradient(x, y, x + badgeW, y);
+      comboGrad.addColorStop(0, '#ff9fd0');
+      comboGrad.addColorStop(1, '#ff2d95');
+      ctx.fillStyle = comboGrad;
+      ctx.shadowColor = '#ff2d95';
+      ctx.shadowBlur = 10;
+      ctx.fillText(`COMBO x${combo}`, W / 2, y + 22);
+      ctx.shadowBlur = 0;
+    }
+    if (scoreMultiplier > 1.01) {
+      ctx.font = '600 11px Rajdhani, sans-serif';
+      ctx.fillStyle = '#ffe14d';
+      ctx.fillText(`${scoreMultiplier.toFixed(1)}x score`, W / 2, y + (combo > 1 ? 34 : 24));
+    }
+  }
+
+  function drawCountdown() {
+    const remaining = Math.max(1, Math.ceil(countdownTimer));
+    const label = String(remaining);
+    const pulse = 0.82 + Math.sin(animFrame * 0.25) * 0.18;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(4, 6, 18, 0.42)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 132px Orbitron, sans-serif';
+    const grad = ctx.createLinearGradient(W / 2 - 120, H / 2 - 60, W / 2 + 120, H / 2 + 60);
+    grad.addColorStop(0, '#00f0ff');
+    grad.addColorStop(0.5, '#ffffff');
+    grad.addColorStop(1, '#ff2d95');
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = pulse;
+    ctx.shadowColor = '#ff2d95';
+    ctx.shadowBlur = 28;
+    ctx.fillText(label, W / 2, H / 2 - 12);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+
+    ctx.font = '600 18px Rajdhani, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+    ctx.fillText('Get ready — steer into position', W / 2, H / 2 + 86);
+    ctx.restore();
+  }
+
+  function drawHUD() {
+    drawHitPointsHud();
+
+    const panelW = 220;
+    const panelH = 88;
+    const panelY = 76;
+    const kmh = Math.floor(speed * SPEED_TO_KMH * (nitroActive ? activeCar.nitroMult : 1));
+    const speedAccent = nitroActive ? '#ff6eb4' : '#ffe14d';
+
+    drawHudPanel(16, panelY, panelW, panelH, 'rgba(255, 225, 77, 0.85)');
+    drawHudStat(30, panelY + 18, 'SCORE', Math.floor(score).toLocaleString(), '', '#ffe14d', 28, panelW);
+    drawHudStat(30, panelY + 54, 'DISTANCE', `${Math.floor(distance)}`, 'm', '#8be9ff', 20, panelW);
+
+    const speedPanelX = W - panelW - 16;
+    drawHudPanel(speedPanelX, panelY, panelW, panelH, speedAccent);
+    drawHudStat(speedPanelX + 14, panelY + 18, 'VELOCITY', `${kmh}`, 'km/h', speedAccent, 36, panelW);
+
+    ctx.textAlign = 'right';
+    ctx.font = '600 11px Rajdhani, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.fillText(activeCar.name.toUpperCase(), speedPanelX + panelW - 14, panelY + panelH - 10);
+
+    const nitroW = 204;
+    const nitroX = 16;
+    const nitroY = H - 50;
+    drawHudPanel(nitroX, nitroY - 16, nitroW, 38, nitroActive ? 'rgba(255, 110, 180, 0.9)' : 'rgba(0, 240, 255, 0.55)', { compact: true });
+    drawNitroBar(nitroX, nitroY, nitroW);
+
+    if (nitroActive) {
+      ctx.textAlign = 'center';
+      ctx.font = '700 13px Orbitron, sans-serif';
+      const boostGrad = ctx.createLinearGradient(W / 2 - 80, 0, W / 2 + 80, 0);
+      boostGrad.addColorStop(0, '#00f0ff');
+      boostGrad.addColorStop(0.5, '#ffffff');
+      boostGrad.addColorStop(1, '#ff2d95');
+      ctx.fillStyle = boostGrad;
+      ctx.shadowColor = '#ff2d95';
+      ctx.shadowBlur = 14;
+      ctx.fillText('◆ NITRO BOOST ◆', W / 2, 72);
+      ctx.shadowBlur = 0;
+    }
+
+    drawComboBadge();
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.lineTo(x + w - r, y);
+    c.quadraticCurveTo(x + w, y, x + w, y + r);
+    c.lineTo(x + w, y + h - r);
+    c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    c.lineTo(x + r, y + h);
+    c.quadraticCurveTo(x, y + h, x, y + h - r);
+    c.lineTo(x, y + r);
+    c.quadraticCurveTo(x, y, x + r, y);
+    c.closePath();
+  }
+
+  function render() {
+    ctx.save();
+
+    if (shakeTimer > 0) {
+      const shake = shakeTimer * 0.5;
+      ctx.translate(
+        (Math.random() - 0.5) * shake,
+        (Math.random() - 0.5) * shake
+      );
+      shakeTimer--;
+    }
+
+    ctx.clearRect(0, 0, W, H);
+
+    if (state === STATE.PLAYING || state === STATE.GAMEOVER || state === STATE.COUNTDOWN) {
+      drawBackground();
+      drawRoad();
+      drawPickups();
+      drawObstacles();
+      drawPlayer();
+      drawParticles();
+      drawRain();
+      drawFloatingTexts();
+      if (state === STATE.COUNTDOWN) {
+        drawCountdown();
+      }
+      if (state === STATE.PLAYING) {
+        drawThemeBanner();
+        drawHUD();
+        if (showLegend) drawLegend();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function gameLoop(timestamp) {
+    const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+    lastTime = timestamp;
+
+    update(dt);
+    render();
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  function isTitleStartKey(key) {
+    return key === ' ' || key === 'Space' || key === 'Enter';
+  }
+
+  function isRestartKey(key) {
+    return key === 'Enter';
+  }
+
+  function clearStartKeys() {
+    keys[' '] = false;
+    keys.Space = false;
+    keys.Enter = false;
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (state === STATE.TITLE) {
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        changeCar(-1);
+        return;
+      }
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        changeCar(1);
+        return;
+      }
+    }
+
+    if (state === STATE.TITLE && isTitleStartKey(e.key)) {
+      e.preventDefault();
+      initAudio();
+      startGame();
+      clearStartKeys();
+      return;
+    }
+
+    if (state === STATE.GAMEOVER && isRestartKey(e.key)) {
+      e.preventDefault();
+      startGame();
+      clearStartKeys();
+      return;
+    }
+
+    if (state === STATE.PLAYING && (e.key === 'l' || e.key === 'L')) {
+      showLegend = !showLegend;
+      return;
+    }
+
+    keys[e.key] = true;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Enter'].includes(e.key)) {
+      e.preventDefault();
+    }
+    if (state === STATE.PLAYING && (e.key === ' ' || e.key === 'Space')) {
+      initAudio();
+    }
+  });
+
+  document.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+  document.getElementById('start-btn').addEventListener('click', () => {
+    initAudio();
+    startGame();
+  });
+
+  document.getElementById('car-prev').addEventListener('click', () => changeCar(-1));
+  document.getElementById('car-next').addEventListener('click', () => changeCar(1));
+
+  document.getElementById('restart-btn').addEventListener('click', () => {
+    startGame();
+  });
+
+  function resizeCanvas() {
+    const container = document.getElementById('game-container');
+    const aspect = W / H;
+    const cW = container.clientWidth;
+    const cH = container.clientHeight;
+
+    if (cW / cH > aspect) {
+      canvas.style.width = `${cH * aspect}px`;
+      canvas.style.height = `${cH}px`;
+    } else {
+      canvas.style.width = `${cW}px`;
+      canvas.style.height = `${cW / aspect}px`;
+    }
+  }
+
+  function boot() {
+    if (window.location.protocol === 'file:') {
+      const text = document.querySelector('.loading-text');
+      if (text) {
+        text.textContent = 'LOADING... (use a local server if this hangs)';
+      }
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    loadAssets().catch((err) => {
+      const hint = window.location.protocol === 'file:'
+        ? ' Try running: npx serve . -l 8765 and open http://localhost:8765'
+        : '';
+      showBootError(`Failed to load assets: ${err.message}.${hint}`);
+    });
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
