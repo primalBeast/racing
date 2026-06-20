@@ -824,21 +824,22 @@
     ctx.restore();
   }
 
-  function drawHeadlightBeams(obs) {
-    const beamY = obs.y + obs.height * 0.58;
-    const spread = obs.width * 0.42;
+  function drawHeadlightBeams(x, y, width, height, beamLength = 95) {
+    const frontY = y + height * 0.14;
+    const beamEndY = frontY - beamLength;
+    const spread = width * 0.42;
     ctx.save();
     ctx.globalAlpha = 0.55;
-    const cone = ctx.createLinearGradient(obs.x, beamY, obs.x, beamY + 95);
+    const cone = ctx.createLinearGradient(x, frontY, x, beamEndY);
     cone.addColorStop(0, 'rgba(255, 252, 210, 0.55)');
     cone.addColorStop(0.45, 'rgba(255, 248, 180, 0.18)');
     cone.addColorStop(1, 'rgba(255, 248, 180, 0)');
     ctx.fillStyle = cone;
     ctx.beginPath();
-    ctx.moveTo(obs.x - 7, beamY);
-    ctx.lineTo(obs.x - spread, beamY + 95);
-    ctx.lineTo(obs.x + spread, beamY + 95);
-    ctx.lineTo(obs.x + 7, beamY);
+    ctx.moveTo(x - 7, frontY);
+    ctx.lineTo(x - spread, beamEndY);
+    ctx.lineTo(x + spread, beamEndY);
+    ctx.lineTo(x + 7, frontY);
     ctx.closePath();
     ctx.fill();
 
@@ -846,32 +847,23 @@
     ctx.fillStyle = '#fff8c8';
     ctx.shadowColor = '#fff8c8';
     ctx.shadowBlur = 10;
-    const lampY = obs.y + obs.height * 0.48;
-    ctx.fillRect(obs.x - obs.width * 0.24, lampY, 5, 4);
-    ctx.fillRect(obs.x + obs.width * 0.19, lampY, 5, 4);
+    const lampY = y + height * 0.1;
+    ctx.fillRect(x - width * 0.24, lampY, 5, 4);
+    ctx.fillRect(x + width * 0.19, lampY, 5, 4);
     ctx.restore();
   }
 
   function drawPlayerHeadlights() {
     const { isNight } = getDayNightLighting();
     if (!isNight) return;
-    const beamY = player.y + player.height * 0.62;
-    const spread = player.width * 0.5;
-    ctx.save();
-    ctx.globalAlpha = 0.5;
-    const cone = ctx.createLinearGradient(player.x, beamY, player.x, beamY + 110);
-    cone.addColorStop(0, 'rgba(255, 252, 220, 0.5)');
-    cone.addColorStop(0.5, 'rgba(255, 248, 190, 0.15)');
-    cone.addColorStop(1, 'rgba(255, 248, 190, 0)');
-    ctx.fillStyle = cone;
-    ctx.beginPath();
-    ctx.moveTo(player.x - 8, beamY);
-    ctx.lineTo(player.x - spread, beamY + 110);
-    ctx.lineTo(player.x + spread, beamY + 110);
-    ctx.lineTo(player.x + 8, beamY);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    const scale = nitroActive ? 1.05 : 1;
+    drawHeadlightBeams(
+      player.x,
+      player.y,
+      player.width * scale,
+      player.height * scale,
+      110
+    );
   }
 
   function getHudTints() {
@@ -1897,7 +1889,7 @@
 
       ctx.save();
       ctx.globalAlpha = enterFade * fogFade;
-      if (isNight) drawHeadlightBeams(obs);
+      if (isNight) drawHeadlightBeams(obs.x, obs.y, obs.width, obs.height);
       const img = images[obs.carType.id];
       drawSprite(img, obs.x, obs.y, obs.width, obs.height, obs.carType.glow, false, obs.angle || 0);
       ctx.restore();
