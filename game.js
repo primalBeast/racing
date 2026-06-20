@@ -76,6 +76,11 @@
   const PLAYER_HIT_INVULN = 1.1;
   const BOUNCE_STRENGTH = 3.2;
   const BOUNCE_DAMPING = 0.86;
+  const DAY_NIGHT_CYCLE = 72;
+  const WEATHER_GRIP = { clear: 1, rain: 0.74, fog: 0.9, snow: 0.84 };
+  const WEATHER_FOG = { clear: 0, rain: 0.1, fog: 0.78, snow: 0.25 };
+  const WEATHER_RAIN = { clear: 0, rain: 1, fog: 0.18, snow: 0.08 };
+  const WEATHER_LABELS = { clear: 'Clear', rain: 'Rain', fog: 'Fog', snow: 'Snow' };
 
   let state = STATE.LOADING;
   let images = {};
@@ -106,6 +111,8 @@
   let obstacles = [];
   let particles = [];
   let rainDrops = [];
+  let weatherSnowflakes = [];
+  let weatherType = 'clear';
   let themeParticles = [];
   let pickups = [];
   let floatingTexts = [];
@@ -623,6 +630,9 @@
     showLegend = true;
     lastTime = performance.now();
     initRoadCurve();
+    weatherType = pickWeather(activeTheme);
+    if (weatherType === 'snow') initWeatherSnow();
+    else weatherSnowflakes = [];
     initRain();
     initAudio();
     playEngineSound(activeCar);
@@ -651,6 +661,228 @@
         opacity: 0.1 + Math.random() * 0.3,
       });
     }
+  }
+
+  function pickWeather(theme) {
+    const roll = Math.random();
+    const rainBias = theme?.rain || 0;
+    if (theme?.id === 'kyoto-winter') {
+      if (roll < 0.62) return 'snow';
+      if (roll < 0.82) return 'fog';
+      return 'clear';
+    }
+    if (rainBias > 0.55) {
+      if (roll < 0.52) return 'rain';
+      if (roll < 0.72) return 'fog';
+      return 'clear';
+    }
+    if (rainBias > 0.15) {
+      if (roll < 0.34) return 'rain';
+      if (roll < 0.48) return 'fog';
+      return 'clear';
+    }
+    if (roll < 0.18) return 'fog';
+    if (roll < 0.3) return 'snow';
+    if (roll < 0.48) return 'rain';
+    return 'clear';
+  }
+
+  function initWeatherSnow() {
+    weatherSnowflakes = [];
+    for (let i = 0; i < 110; i++) {
+      weatherSnowflakes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        speed: 0.6 + Math.random() * 1.6,
+        drift: (Math.random() - 0.5) * 1.4,
+        size: 1.5 + Math.random() * 3.5,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  function updateWeatherSnow(dt, scroll) {
+    weatherSnowflakes.forEach((flake) => {
+      flake.y += flake.speed + scroll * 0.25;
+      flake.x += flake.drift + Math.sin(flake.phase) * 0.35;
+      flake.phase += dt * 1.8;
+      if (flake.y > H + 10) {
+        flake.y = -10;
+        flake.x = Math.random() * W;
+      }
+      if (flake.x < -10) flake.x = W + 10;
+      if (flake.x > W + 10) flake.x = -10;
+    });
+  }
+
+  function getDayNightPhase() {
+    return (raceTime % DAY_NIGHT_CYCLE) / DAY_NIGHT_CYCLE;
+  }
+
+  function getDayNightLighting() {
+    const phase = getDayNightPhase();
+    const sun = Math.sin(phase * Math.PI * 2 - Math.PI / 2) * 0.5 + 0.5;
+    return {
+      phase,
+      sun,
+      isNight: sun < 0.34,
+      label: getTimeOfDayLabel(phase),
+    };
+  }
+
+  function getTimeOfDayLabel(phase) {
+    if (phase < 0.1 || phase >= 0.9) return 'Night';
+    if (phase < 0.22) return 'Dawn';
+    if (phase < 0.58) return 'Day';
+    if (phase < 0.78) return 'Dusk';
+    return 'Night';
+  }
+
+  function weatherGripMult() {
+    return WEATHER_GRIP[weatherType] || 1;
+  }
+
+  function weatherSteerSlip() {
+    if (weatherType === 'rain') return 0.72;
+    if (weatherType === 'snow') return 0.8;
+    return 1;
+  }
+
+  function fogVisibilityAtY(screenY) {
+    const fog = WEATHER_FOG[weatherType] || 0;
+    if (fog <= 0) return 1;
+    const depth = 1 - screenY / H;
+    return 1 - fog * (0.25 + depth * 0.75);
+  }
+
+  function rainIntensity() {
+    const themeRain = activeTheme ? activeTheme.rain || 0 : 0;
+    const weatherRain = WEATHER_RAIN[weatherType] || 0;
+    return Math.min(1.2, themeRain * 0.35 + weatherRain);
+  }
+
+  function drawDayNightOverlay() {
+    const { sun } = getDayNightLighting();
+    if (sun > 0.97) return;
+
+    ctx.save();
+    if (sun < 0.38) {
+      const night = 1 - sun / 0.38;
+      ctx.fillStyle = `rgba(6, 10, 36, ${0.5 * night})`;
+      ctx.fillRect(0, 0, W, H);
+      const moonGlow = ctx.createRadialGradient(W * 0.78, H * 0.14, 0, W * 0.78, H * 0.14, 120);
+      moonGlow.addColorStop(0, `rgba(180, 200, 255, ${0.12 * night})`);
+      moonGlow.addColorStop(1, 'rgba(180, 200, 255, 0)');
+      ctx.fillStyle = moonGlow;
+      ctx.fillRect(0, 0, W, H);
+    } else if (sun < 0.58 || sun > 0.82) {
+      const twilight = sun < 0.58
+        ? 1 - sun / 0.58
+        : (sun - 0.82) / 0.18;
+      const grad = ctx.createLinearGradient(0, 0, 0, H * 0.55);
+      grad.addColorStop(0, `rgba(255, 120, 60, ${0.18 * twilight})`);
+      grad.addColorStop(0.5, `rgba(120, 50, 120, ${0.1 * twilight})`);
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    } else if (sun > 0.58 && sun < 0.82) {
+      ctx.fillStyle = `rgba(255, 240, 200, ${(sun - 0.58) * 0.06})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
+  }
+
+  function drawFogOverlay() {
+    const fog = WEATHER_FOG[weatherType] || 0;
+    if (fog <= 0.02) return;
+
+    ctx.save();
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, `rgba(196, 206, 222, ${0.62 * fog})`);
+    grad.addColorStop(0.28, `rgba(176, 188, 208, ${0.34 * fog})`);
+    grad.addColorStop(0.62, `rgba(150, 165, 185, ${0.1 * fog})`);
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function drawWeatherSnow() {
+    if (weatherType !== 'snow' || !weatherSnowflakes.length) return;
+    ctx.save();
+    weatherSnowflakes.forEach((flake) => {
+      ctx.globalAlpha = 0.55 + Math.sin(flake.phase) * 0.2;
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#cfe8ff';
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      ctx.arc(flake.x, flake.y, flake.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  function drawHeadlightBeams(obs) {
+    const beamY = obs.y + obs.height * 0.58;
+    const spread = obs.width * 0.42;
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    const cone = ctx.createLinearGradient(obs.x, beamY, obs.x, beamY + 95);
+    cone.addColorStop(0, 'rgba(255, 252, 210, 0.55)');
+    cone.addColorStop(0.45, 'rgba(255, 248, 180, 0.18)');
+    cone.addColorStop(1, 'rgba(255, 248, 180, 0)');
+    ctx.fillStyle = cone;
+    ctx.beginPath();
+    ctx.moveTo(obs.x - 7, beamY);
+    ctx.lineTo(obs.x - spread, beamY + 95);
+    ctx.lineTo(obs.x + spread, beamY + 95);
+    ctx.lineTo(obs.x + 7, beamY);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = '#fff8c8';
+    ctx.shadowColor = '#fff8c8';
+    ctx.shadowBlur = 10;
+    const lampY = obs.y + obs.height * 0.48;
+    ctx.fillRect(obs.x - obs.width * 0.24, lampY, 5, 4);
+    ctx.fillRect(obs.x + obs.width * 0.19, lampY, 5, 4);
+    ctx.restore();
+  }
+
+  function drawPlayerHeadlights() {
+    const { isNight } = getDayNightLighting();
+    if (!isNight) return;
+    const beamY = player.y + player.height * 0.62;
+    const spread = player.width * 0.5;
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    const cone = ctx.createLinearGradient(player.x, beamY, player.x, beamY + 110);
+    cone.addColorStop(0, 'rgba(255, 252, 220, 0.5)');
+    cone.addColorStop(0.5, 'rgba(255, 248, 190, 0.15)');
+    cone.addColorStop(1, 'rgba(255, 248, 190, 0)');
+    ctx.fillStyle = cone;
+    ctx.beginPath();
+    ctx.moveTo(player.x - 8, beamY);
+    ctx.lineTo(player.x - spread, beamY + 110);
+    ctx.lineTo(player.x + spread, beamY + 110);
+    ctx.lineTo(player.x + 8, beamY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function getHudTints() {
+    const lighting = getDayNightLighting();
+    const night = lighting.isNight;
+    return {
+      score: night ? '#9fd4ff' : '#ffe14d',
+      distance: night ? '#6ec8ff' : '#8be9ff',
+      speed: night ? (nitroActive ? '#ff8fd0' : '#ffd080') : (nitroActive ? '#ff6eb4' : '#ffe14d'),
+      panelAlpha: night ? 0.88 : 1,
+    };
   }
 
   function initAudio() {
@@ -1059,7 +1291,8 @@
       -MAX_CAR_ANGLE,
       Math.min(MAX_CAR_ANGLE, inputAngle * 0.65 + velAngle * 0.35 + roadLean)
     );
-    const blend = Math.min(1, ANGLE_RESPONSIVENESS * dt);
+    const slip = car === player ? weatherSteerSlip() : 1;
+    const blend = Math.min(1, ANGLE_RESPONSIVENESS * dt * slip);
     car.angle += (targetAngle - car.angle) * blend;
   }
 
@@ -1196,10 +1429,15 @@
   }
 
   function handleInput(dt) {
-    const steer = STEER_BASE * activeCar.steerMult * dt * 60;
     const steerInput = getSteerInput();
+    const grip = weatherGripMult();
+    const steer = STEER_BASE * activeCar.steerMult * grip * dt * 60;
     if (steerInput < 0) player.x -= steer;
     if (steerInput > 0) player.x += steer;
+    if (weatherType === 'snow' && steerInput !== 0 && state === STATE.PLAYING) {
+      const speedFactor = Math.min(1.2, speed / Math.max(kmhToSpeed(60), 0.5));
+      player.vx += steerInput * dt * 3.4 * speedFactor;
+    }
     clampPlayerToRoad();
 
     nitroActive = state === STATE.PLAYING && (keys[' '] || keys['Space']) && nitro > 0;
@@ -1366,16 +1604,19 @@
     });
     particles = particles.filter((p) => p.life > 0);
 
-    const rainIntensity = activeTheme ? activeTheme.rain || 0 : 0.5;
+    const rainLevel = rainIntensity();
     rainDrops.forEach((drop) => {
-      drop.y += (drop.speed + currentSpeed * 0.5) * (0.5 + rainIntensity);
-      drop.x -= 1 + rainIntensity;
+      drop.y += (drop.speed + currentSpeed * 0.5) * (0.5 + rainLevel);
+      drop.x -= 1 + rainLevel;
       if (drop.y > H) { drop.y = -20; drop.x = Math.random() * W; }
       if (drop.x < 0) drop.x = W;
     });
 
     if (themeParticles.length && window.updateThemeParticles) {
       window.updateThemeParticles(themeParticles, W, H, currentSpeed * 0.02, dt);
+    }
+    if (weatherType === 'snow') {
+      updateWeatherSnow(dt, currentSpeed * 0.02);
     }
 
     floatingTexts.forEach((ft) => {
@@ -1394,6 +1635,7 @@
       if (activeTheme.drawParticles && themeParticles.length) {
         activeTheme.drawParticles(ctx, themeParticles);
       }
+      drawDayNightOverlay();
     } else {
       const grad = ctx.createLinearGradient(0, 0, 0, H);
       grad.addColorStop(0, '#0a0618');
@@ -1462,7 +1704,9 @@
 
   function drawPickups() {
     pickups.forEach((pickup) => {
+      const fogFade = fogVisibilityAtY(pickup.y);
       ctx.save();
+      ctx.globalAlpha = fogFade;
       ctx.translate(pickup.x, pickup.y);
       ctx.rotate(pickup.spin);
       if (pickup.type === 'nitro') {
@@ -1510,7 +1754,7 @@
     ctx.save();
     ctx.globalAlpha = alpha;
     const panelW = 420;
-    const panelH = 72;
+    const panelH = 84;
     const x = (W - panelW) / 2;
     const y = 110;
     drawHudPanel(x, y, panelW, panelH, 'rgba(0, 240, 255, 0.5)');
@@ -1520,7 +1764,12 @@
     ctx.fillText(activeTheme.name, W / 2, y + 30);
     ctx.font = '600 13px Rajdhani, sans-serif';
     ctx.fillStyle = '#8be9ff';
-    ctx.fillText(activeTheme.subtitle, W / 2, y + 52);
+    ctx.fillText(activeTheme.subtitle, W / 2, y + 48);
+    const lighting = getDayNightLighting();
+    const weatherLabel = WEATHER_LABELS[weatherType] || 'Clear';
+    ctx.font = '600 12px Rajdhani, sans-serif';
+    ctx.fillStyle = weatherType === 'rain' ? '#9fd4ff' : weatherType === 'snow' ? '#e8f4ff' : weatherType === 'fog' ? '#c8d0e0' : '#b8c8e8';
+    ctx.fillText(`${weatherLabel} · ${lighting.label}`, W / 2, y + 64);
     ctx.restore();
   }
 
@@ -1572,8 +1821,9 @@
       ctx.fillRect(bounds.left, y, ROAD_WIDTH, ROAD_STEP + 0.5);
 
       const shimmer = (Math.sin(wy * 0.022 + roadOffset * 0.04) + 1) * 0.5;
-      if (shimmer > 0.82) {
-        ctx.fillStyle = `rgba(90, 170, 210, ${(shimmer - 0.82) * 0.35})`;
+      const wetBoost = weatherType === 'rain' ? 0.12 : 0;
+      if (shimmer + wetBoost > 0.82) {
+        ctx.fillStyle = `rgba(90, 170, 210, ${(shimmer + wetBoost - 0.82) * 0.42})`;
         ctx.fillRect(bounds.left + ROAD_WIDTH * 0.08, y, ROAD_WIDTH * 0.84, ROAD_STEP + 0.5);
       }
     }
@@ -1637,14 +1887,17 @@
   }
 
   function drawObstacles() {
+    const { isNight } = getDayNightLighting();
     obstacles.forEach((obs) => {
       if (obs.y + obs.height < -8) return;
 
       const enterFade = Math.min(1, (obs.y + obs.height) / 90);
       if (enterFade <= 0) return;
+      const fogFade = fogVisibilityAtY(obs.y + obs.height * 0.5);
 
       ctx.save();
-      ctx.globalAlpha = enterFade;
+      ctx.globalAlpha = enterFade * fogFade;
+      if (isNight) drawHeadlightBeams(obs);
       const img = images[obs.carType.id];
       drawSprite(img, obs.x, obs.y, obs.width, obs.height, obs.carType.glow, false, obs.angle || 0);
       ctx.restore();
@@ -1929,10 +2182,12 @@
   }
 
   function drawRain() {
+    const level = rainIntensity();
+    if (level < 0.05) return;
     ctx.strokeStyle = 'rgba(150, 200, 255, 0.3)';
     ctx.lineWidth = 1;
     rainDrops.forEach((drop) => {
-      ctx.globalAlpha = drop.opacity;
+      ctx.globalAlpha = drop.opacity * Math.min(1, level * 1.1);
       ctx.beginPath();
       ctx.moveTo(drop.x, drop.y);
       ctx.lineTo(drop.x - 3, drop.y + drop.len);
@@ -2073,6 +2328,24 @@
     ctx.fillText(`${Math.floor(nitro)}%`, x + w / 2, barY + barH + 12);
   }
 
+  function drawEnvironmentBadge() {
+    if (themeBannerTimer > 0) return;
+    const lighting = getDayNightLighting();
+    const label = `${WEATHER_LABELS[weatherType]} · ${lighting.label}`;
+    const badgeW = 148;
+    const badgeH = 22;
+    const x = (W - badgeW) / 2;
+    const y = 18;
+    ctx.save();
+    ctx.globalAlpha = lighting.isNight ? 0.82 : 0.9;
+    drawHudPanel(x, y, badgeW, badgeH, lighting.isNight ? 'rgba(120, 180, 255, 0.45)' : 'rgba(255, 225, 120, 0.4)', { compact: true });
+    ctx.textAlign = 'center';
+    ctx.font = '600 11px Rajdhani, sans-serif';
+    ctx.fillStyle = lighting.isNight ? '#b8d8ff' : '#ffe8a8';
+    ctx.fillText(label, W / 2, y + 15);
+    ctx.restore();
+  }
+
   function drawComboBadge() {
     if (combo <= 1 && scoreMultiplier <= 1.01) return;
 
@@ -2132,17 +2405,22 @@
   }
 
   function drawHUD() {
+    const tints = getHudTints();
+    const lighting = getDayNightLighting();
+    ctx.save();
+    if (lighting.isNight) ctx.globalAlpha = tints.panelAlpha;
     drawHitPointsHud();
 
     const panelW = 220;
     const panelH = 88;
     const panelY = 76;
     const kmh = Math.floor(speed * SPEED_TO_KMH * (nitroActive ? activeCar.nitroMult : 1));
-    const speedAccent = nitroActive ? '#ff6eb4' : '#ffe14d';
+    const speedAccent = tints.speed;
+    const scorePanelAccent = lighting.isNight ? 'rgba(120, 190, 255, 0.75)' : 'rgba(255, 225, 77, 0.85)';
 
-    drawHudPanel(16, panelY, panelW, panelH, 'rgba(255, 225, 77, 0.85)');
-    drawHudStat(30, panelY + 18, 'SCORE', Math.floor(score).toLocaleString(), '', '#ffe14d', 28, panelW);
-    drawHudStat(30, panelY + 54, 'DISTANCE', `${Math.floor(distance)}`, 'm', '#8be9ff', 20, panelW);
+    drawHudPanel(16, panelY, panelW, panelH, scorePanelAccent);
+    drawHudStat(30, panelY + 18, 'SCORE', Math.floor(score).toLocaleString(), '', tints.score, 28, panelW);
+    drawHudStat(30, panelY + 54, 'DISTANCE', `${Math.floor(distance)}`, 'm', tints.distance, 20, panelW);
 
     const speedPanelX = W - panelW - 16;
     drawHudPanel(speedPanelX, panelY, panelW, panelH, speedAccent);
@@ -2173,7 +2451,9 @@
       ctx.shadowBlur = 0;
     }
 
+    drawEnvironmentBadge();
     drawComboBadge();
+    ctx.restore();
   }
 
   function roundRect(c, x, y, w, h, r) {
@@ -2209,9 +2489,12 @@
       drawRoad();
       drawPickups();
       drawObstacles();
+      drawPlayerHeadlights();
       drawPlayer();
       drawParticles();
       drawRain();
+      drawWeatherSnow();
+      drawFogOverlay();
       drawFloatingTexts();
       if (state === STATE.COUNTDOWN) {
         drawCountdown();
