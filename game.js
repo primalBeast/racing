@@ -44,7 +44,8 @@
   const SPEED_STRIP_PERIOD = 1400;
   const SPEED_STRIP_LENGTH = 220;
   const DIFFICULTY_RAMP_DISTANCE = 9000;
-  const MAX_SPEED_KMH = 250;
+  const MAX_SPEED_KMH = 200;
+  const NITRO_MAX_SPEED_KMH = 250;
   const LAUNCH_SPEED_KMH = 100;
   const SPEED_PHASE1_DURATION = 1.5;
   const SPEED_PHASE2_DURATION = 36;
@@ -567,7 +568,7 @@
     return gameSpeed * SPEED_TO_KMH;
   }
 
-  function targetSpeedKmh(elapsed) {
+  function targetSpeedKmh(elapsed, maxKmh = MAX_SPEED_KMH) {
     if (elapsed <= SPEED_PHASE1_DURATION) {
       const t = elapsed / SPEED_PHASE1_DURATION;
       const eased = 1 - (1 - t) ** 3;
@@ -575,12 +576,13 @@
     }
     const phase2 = Math.min(1, (elapsed - SPEED_PHASE1_DURATION) / SPEED_PHASE2_DURATION);
     const eased = phase2 * phase2 * (3 - 2 * phase2);
-    return LAUNCH_SPEED_KMH + (MAX_SPEED_KMH - LAUNCH_SPEED_KMH) * eased;
+    return LAUNCH_SPEED_KMH + (maxKmh - LAUNCH_SPEED_KMH) * eased;
   }
 
   function currentTargetKmh() {
     const stripMult = speedBoostTimer > 0 ? 1.1 : 1;
-    return Math.min(MAX_SPEED_KMH, targetSpeedKmh(raceTime)) * stripMult;
+    const maxKmh = nitroActive ? NITRO_MAX_SPEED_KMH : MAX_SPEED_KMH;
+    return Math.min(maxKmh, targetSpeedKmh(raceTime, maxKmh)) * stripMult;
   }
 
   function updatePlayerSpeed(dt) {
@@ -618,7 +620,7 @@
   }
 
   function applySpeedPenalty(kmhLoss) {
-    speedPenaltyKmh = Math.min(speedPenaltyKmh + kmhLoss, MAX_SPEED_KMH * 0.4);
+    speedPenaltyKmh = Math.min(speedPenaltyKmh + kmhLoss, NITRO_MAX_SPEED_KMH * 0.4);
   }
 
   function penalizeRaceProgress(seconds) {
@@ -1978,7 +1980,7 @@
     }
     updatePlayerSpeed(dt);
 
-    const currentSpeed = speed * (nitroActive ? activeCar.nitroMult : 1);
+    const currentSpeed = speed;
     const steerInput = getSteerInput();
     const lateralVel = (player.x - player.prevX) / Math.max(dt, 0.001);
     updateCarAngle(player, lateralVel, currentSpeed, steerInput, dt, playerRoadLean());
@@ -2919,7 +2921,7 @@
     const panelW = 220;
     const panelH = 88;
     const panelY = 76;
-    const kmh = Math.floor(speed * SPEED_TO_KMH * (nitroActive ? activeCar.nitroMult : 1));
+    const kmh = Math.floor(speedToKmh(speed));
     const speedAccent = tints.speed;
     const scorePanelAccent = lighting.isNight ? 'rgba(120, 190, 255, 0.75)' : 'rgba(255, 225, 77, 0.85)';
 
