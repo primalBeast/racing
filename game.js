@@ -720,13 +720,16 @@
 
   function roadBoundsAtScreenY(screenY) {
     const { center, nx } = roadNormalAtScreenY(screenY);
-    const left = center - nx * (ROAD_WIDTH / 2);
-    const right = left + nx * ROAD_WIDTH;
+    // Keep perpendicular width at ROAD_WIDTH; widen horizontal span on curves.
+    const absNx = Math.max(0.32, Math.abs(nx));
+    const horizontalHalf = (ROAD_WIDTH / 2) / absNx;
+    const left = center - horizontalHalf;
+    const right = center + horizontalHalf;
     return {
       left,
       right,
       center,
-      width: right - left,
+      width: horizontalHalf * 2,
     };
   }
 
