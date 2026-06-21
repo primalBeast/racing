@@ -25,6 +25,9 @@
       background: var(--bg-dark);
       font-family: 'Rajdhani', sans-serif;
       color: #fff;
+      touch-action: manipulation;
+      -webkit-user-select: none;
+      user-select: none;
     }
 
     #game-container {
@@ -35,6 +38,7 @@
       align-items: center;
       justify-content: center;
       background: radial-gradient(ellipse at center, #12122a 0%, #050508 100%);
+      touch-action: none;
     }
 
     canvas {
@@ -43,6 +47,7 @@
       max-height: 100%;
       box-shadow: 0 0 60px rgba(255, 45, 149, 0.25), 0 0 120px rgba(0, 240, 255, 0.1);
       border: 1px solid rgba(0, 240, 255, 0.2);
+      touch-action: none;
     }
 
     .overlay {
@@ -464,6 +469,13 @@
       font-family: 'Orbitron', sans-serif;
       font-size: 0.75rem;
     }
+
+    .mobile-controls-hint { display: none; }
+
+    @media (hover: none) and (pointer: coarse) {
+      .desktop-controls-hint { display: none; }
+      .mobile-controls-hint { display: block; }
+    }
   </style>
 </head>
 <body>
@@ -493,11 +505,15 @@
           <button id="car-next" class="car-nav" type="button">›</button>
         </div>
         <button id="start-btn" class="btn">Start Race</button>
-        <div class="controls-hint">
+        <div class="controls-hint desktop-controls-hint">
           <kbd>←</kbd> <kbd>→</kbd> choose car &nbsp;|&nbsp;
           Press <kbd>SPACE</kbd> or <kbd>ENTER</kbd> to start &nbsp;|&nbsp;
           <kbd>A</kbd> <kbd>D</kbd> steer &nbsp;|&nbsp; <kbd>SPACE</kbd> nitro &nbsp;|&nbsp;
           <kbd>L</kbd> legend
+        </div>
+        <div class="controls-hint mobile-controls-hint">
+          Swipe left/right to choose car &nbsp;|&nbsp; Tap to start &nbsp;|&nbsp;
+          Drag to steer &nbsp;|&nbsp; Swipe up for nitro
         </div>
       </div>
 
@@ -534,8 +550,11 @@
         <p class="final-score">Score: <span id="final-score">0</span></p>
         <p class="final-distance">Distance: <span id="final-distance">0</span> m</p>
         <button id="restart-btn" class="btn">Race Again</button>
-        <div class="controls-hint" style="margin-top: 1.5rem;">
+        <div class="controls-hint desktop-controls-hint" style="margin-top: 1.5rem;">
           Press <kbd>ENTER</kbd> to race again
+        </div>
+        <div class="controls-hint mobile-controls-hint" style="margin-top: 1.5rem;">
+          Tap to race again
         </div>
       </div>
     </div>
@@ -543,6 +562,6 @@
 
   <script src="cars.js?v=15"></script>
   <script src="themes.js?v=15"></script>
-  <script src="game.js?v=31"></script>
+  <script src="game.js?v=32"></script>
 </body>
 </html>

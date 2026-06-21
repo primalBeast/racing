@@ -87,6 +87,16 @@
   let state = STATE.LOADING;
   let images = {};
   let keys = {};
+  let touchControl = {
+    active: false,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    x: 0,
+    y: 0,
+    steer: 0,
+    nitro: false,
+  };
   let audioCtx = null;
 
   let selectedCarIndex = 0;
@@ -1172,10 +1182,93 @@
   }
 
   function getSteerInput() {
+    if (touchControl.active && (state === STATE.PLAYING || state === STATE.COUNTDOWN)) {
+      return touchControl.steer;
+    }
     let input = 0;
     if (keys['ArrowLeft'] || keys['a'] || keys['A']) input -= 1;
     if (keys['ArrowRight'] || keys['d'] || keys['D']) input += 1;
     return input;
+  }
+
+  function canvasCoordsFromClient(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((clientX - rect.left) / rect.width) * W,
+      y: ((clientY - rect.top) / rect.height) * H,
+    };
+  }
+
+  function resetTouchControl() {
+    touchControl.active = false;
+    touchControl.pointerId = null;
+    touchControl.steer = 0;
+    touchControl.nitro = false;
+  }
+
+  function updateTouchControl(coords) {
+    touchControl.x = coords.x;
+    touchControl.y = coords.y;
+
+    if (state === STATE.PLAYING || state === STATE.COUNTDOWN) {
+      touchControl.steer = Math.max(-1, Math.min(1, (coords.x - player.x) / (W * 0.17)));
+      const dy = coords.y - touchControl.startY;
+      const dx = coords.x - touchControl.startX;
+      touchControl.nitro = dy < -48 && Math.abs(dy) > Math.abs(dx) * 1.12;
+    }
+  }
+
+  function initTouchControls() {
+    document.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || touchControl.active) return;
+      if (e.target.closest('button')) return;
+
+      touchControl.active = true;
+      touchControl.pointerId = e.pointerId;
+      const coords = canvasCoordsFromClient(e.clientX, e.clientY);
+      touchControl.startX = coords.x;
+      touchControl.startY = coords.y;
+      touchControl.x = coords.x;
+      touchControl.y = coords.y;
+      touchControl.steer = 0;
+      touchControl.nitro = false;
+
+      if (state === STATE.PLAYING || state === STATE.COUNTDOWN) {
+        try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+      }
+      initAudio();
+      updateTouchControl(coords);
+    });
+
+    document.addEventListener('pointermove', (e) => {
+      if (!touchControl.active || e.pointerId !== touchControl.pointerId) return;
+      updateTouchControl(canvasCoordsFromClient(e.clientX, e.clientY));
+    });
+
+    const endTouch = (e) => {
+      if (!touchControl.active || e.pointerId !== touchControl.pointerId) return;
+
+      const coords = canvasCoordsFromClient(e.clientX, e.clientY);
+      const dx = coords.x - touchControl.startX;
+      const dy = coords.y - touchControl.startY;
+      const tap = Math.abs(dx) < 32 && Math.abs(dy) < 32;
+
+      if (state === STATE.TITLE) {
+        if (Math.abs(dx) > 52 && Math.abs(dx) > Math.abs(dy) * 1.1) {
+          changeCar(dx > 0 ? 1 : -1);
+        } else if (tap) {
+          startGame();
+        }
+      } else if (state === STATE.GAMEOVER && tap) {
+        startGame();
+      }
+
+      try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+      resetTouchControl();
+    };
+
+    document.addEventListener('pointerup', endTouch);
+    document.addEventListener('pointercancel', endTouch);
   }
 
   function carsOverlap(a, b) {
@@ -1470,7 +1563,9 @@
     }
     clampPlayerToRoad();
 
-    nitroActive = state === STATE.PLAYING && (keys[' '] || keys['Space']) && nitro > 0;
+    nitroActive = state === STATE.PLAYING
+      && (keys[' '] || keys['Space'] || touchControl.nitro)
+      && nitro > 0;
     if (nitroActive) {
       nitro = Math.max(0, nitro - activeCar.nitroDrain);
     } else {
@@ -2655,6 +2750,7 @@
 
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
+    initTouchControls();
 
     loadAssets().catch((err) => {
       const hint = window.location.protocol === 'file:'
