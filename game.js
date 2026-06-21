@@ -719,15 +719,42 @@
     };
   }
 
+  function getViewportEdgeMarginsInternal() {
+    const container = document.getElementById('game-container');
+    if (!container || !canvas) {
+      return { left: ROAD_EDGE_MARGIN, right: ROAD_EDGE_MARGIN };
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return { left: ROAD_EDGE_MARGIN, right: ROAD_EDGE_MARGIN };
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const leftInternal = ((containerRect.left + ROAD_EDGE_MARGIN - rect.left) / rect.width) * W;
+    const rightInternal = ((containerRect.right - ROAD_EDGE_MARGIN - rect.left) / rect.width) * W;
+    return {
+      left: Math.max(0, leftInternal),
+      right: Math.max(0, W - rightInternal),
+    };
+  }
+
+  function getViewportEdgeMarkerPositions() {
+    const margins = getViewportEdgeMarginsInternal();
+    return [margins.left, W - margins.right];
+  }
+
   function roadBoundsAtScreenY(screenY) {
     const { center, nx } = roadNormalAtScreenY(screenY);
     const absNx = Math.max(0.32, Math.abs(nx));
     const desiredHalf = (ROAD_WIDTH / 2) / absNx;
-    const maxHalf = (W - ROAD_EDGE_MARGIN * 2) / 2;
+    const edge = getViewportEdgeMarginsInternal();
+    const playableWidth = W - edge.left - edge.right;
+    const maxHalf = playableWidth / 2;
     const horizontalHalf = Math.min(desiredHalf, maxHalf);
 
-    const minCenter = ROAD_EDGE_MARGIN + horizontalHalf;
-    const maxCenter = W - ROAD_EDGE_MARGIN - horizontalHalf;
+    const minCenter = edge.left + horizontalHalf;
+    const maxCenter = W - edge.right - horizontalHalf;
     let clampedCenter = center;
     if (minCenter <= maxCenter) {
       clampedCenter = Math.max(minCenter, Math.min(maxCenter, center));
@@ -3036,37 +3063,42 @@
     c.closePath();
   }
 
+  function setEdgeMarginDebugVisible(visible) {
+    document.querySelectorAll('.edge-debug-marker').forEach((el) => {
+      el.classList.toggle('hidden', !visible);
+    });
+  }
+
   function drawEdgeMarginDebugMarkers() {
-    const flash = 0.45 + Math.sin(animFrame * 0.22) * 0.45;
-    const markerX = [ROAD_EDGE_MARGIN, W - ROAD_EDGE_MARGIN];
+    const flash = 0.55 + Math.sin(performance.now() * 0.008) * 0.45;
+    const markerX = getViewportEdgeMarkerPositions();
     const centerY = H / 2;
-    const lineHalf = Math.min(180, H * 0.22);
 
     ctx.save();
+    ctx.globalAlpha = flash;
     markerX.forEach((x) => {
-      ctx.globalAlpha = flash;
       ctx.strokeStyle = '#ffe14d';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([10, 8]);
+      ctx.lineWidth = 5;
+      ctx.setLineDash([14, 10]);
       ctx.beginPath();
-      ctx.moveTo(x, centerY - lineHalf);
-      ctx.lineTo(x, centerY + lineHalf);
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
       ctx.stroke();
 
       ctx.setLineDash([]);
       ctx.fillStyle = '#ff2d95';
-      ctx.shadowColor = '#ffe14d';
-      ctx.shadowBlur = 16;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(x, centerY, 10, 0, Math.PI * 2);
+      ctx.arc(x, centerY, 16, 0, Math.PI * 2);
       ctx.fill();
-      ctx.shadowBlur = 0;
+      ctx.stroke();
 
       ctx.fillStyle = '#ffffff';
-      ctx.font = '700 12px Orbitron, sans-serif';
+      ctx.font = '700 16px Orbitron, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('100px', x, centerY - lineHalf - 18);
+      ctx.fillText('100px', x, centerY);
     });
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -3106,7 +3138,13 @@
         drawHUD();
         if (showLegend) drawLegend();
       }
+    }
+
+    if (state !== STATE.LOADING) {
+      setEdgeMarginDebugVisible(true);
       drawEdgeMarginDebugMarkers();
+    } else {
+      setEdgeMarginDebugVisible(false);
     }
 
     ctx.restore();

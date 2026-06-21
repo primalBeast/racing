@@ -49,6 +49,42 @@
       touch-action: none;
     }
 
+    .edge-debug-marker {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 6px;
+      height: 42vh;
+      z-index: 150;
+      pointer-events: none;
+      border-radius: 3px;
+      background: linear-gradient(180deg, #ff2d95 0%, #ffe14d 50%, #ff2d95 100%);
+      box-shadow: 0 0 24px rgba(255, 225, 77, 0.95), 0 0 48px rgba(255, 45, 149, 0.65);
+      animation: edge-marker-flash 0.7s ease-in-out infinite alternate;
+    }
+
+    .edge-debug-marker::after {
+      content: '100px';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: 'Orbitron', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      color: #ffffff;
+      text-shadow: 0 0 10px #ff2d95, 0 0 18px #ffe14d;
+      white-space: nowrap;
+    }
+
+    #edge-marker-left { left: 100px; }
+    #edge-marker-right { right: 100px; }
+
+    @keyframes edge-marker-flash {
+      from { opacity: 0.35; }
+      to { opacity: 1; }
+    }
+
     .overlay {
       position: absolute;
       inset: 0;
@@ -485,6 +521,8 @@
     </div>
 
     <canvas id="game-canvas" width="1280" height="720"></canvas>
+    <div id="edge-marker-left" class="edge-debug-marker hidden" aria-hidden="true"></div>
+    <div id="edge-marker-right" class="edge-debug-marker hidden" aria-hidden="true"></div>
 
     <div id="title-screen" class="overlay hidden">
       <div id="title-bg" class="title-bg"></div>
@@ -561,6 +599,6 @@
 
   <script src="cars.js?v=15"></script>
   <script src="themes.js?v=15"></script>
-  <script src="game.js?v=49"></script>
+  <script src="game.js?v=50"></script>
 </body>
 </html>
