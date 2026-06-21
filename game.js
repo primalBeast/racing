@@ -64,10 +64,12 @@
   const ROAD_EDGE_MARGIN = 100;
   let ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
   let CURVE_AMPLITUDE = 0;
-  const STRAIGHT_SEGMENT_MIN = 520;
-  const STRAIGHT_SEGMENT_MAX = 1050;
-  const CURVE_SEGMENT_MIN = 520;
-  const CURVE_SEGMENT_MAX = 920;
+  const CURVE_NORMAL_MIN = 0.42;
+  const CURVE_MARGIN_REACH = 1.06;
+  const STRAIGHT_SEGMENT_MIN = 580;
+  const STRAIGHT_SEGMENT_MAX = 1120;
+  const CURVE_SEGMENT_MIN = 720;
+  const CURVE_SEGMENT_MAX = 1240;
   const SPEED_TO_KMH = 15;
   const TRAFFIC_KMH_MIN = 60;
   const TRAFFIC_KMH_MAX = 120;
@@ -246,8 +248,7 @@
   };
 
   function getMaxRoadHalfWidth() {
-    const absNx = 0.32;
-    const desiredHalf = (ROAD_WIDTH / 2) / absNx;
+    const desiredHalf = (ROAD_WIDTH / 2) / CURVE_NORMAL_MIN;
     const edge = getViewportEdgeMarginsInternal();
     const playableWidth = W - edge.left - edge.right;
     return Math.min(desiredHalf, playableWidth / 2);
@@ -258,7 +259,7 @@
     const halfW = getMaxRoadHalfWidth();
     const leftOffset = Math.abs(edge.left + halfW - W / 2);
     const rightOffset = Math.abs((W - edge.right - halfW) - W / 2);
-    return Math.max(leftOffset, rightOffset, ROAD_WIDTH);
+    return Math.max(leftOffset, rightOffset, ROAD_WIDTH) * CURVE_MARGIN_REACH;
   }
 
   function syncCanvasMetrics() {
@@ -510,14 +511,14 @@
 
   function pickCurveTarget(currentOffset) {
     const roll = Math.random();
-    if (roll < 0.4) {
+    if (roll < 0.24) {
       const sign = currentOffset > 0 ? -1 : 1;
-      return sign * CURVE_AMPLITUDE * (0.82 + Math.random() * 0.18);
+      return sign * CURVE_AMPLITUDE * (0.44 + Math.random() * 0.16);
     }
-    if (roll < 0.72) {
-      return (Math.random() < 0.5 ? -1 : 1) * CURVE_AMPLITUDE * (0.55 + Math.random() * 0.35);
+    if (roll < 0.68) {
+      return (Math.random() < 0.5 ? -1 : 1) * CURVE_AMPLITUDE * (0.8 + Math.random() * 0.2);
     }
-    return currentOffset * 0.45;
+    return currentOffset * 0.36;
   }
 
   function appendRoadSegment(last, type) {
@@ -540,7 +541,7 @@
       let nextType;
       if (lastType === 'straight') {
         nextType = 'curve';
-      } else if (Math.random() < 0.68) {
+      } else if (Math.random() < 0.78) {
         nextType = 'straight';
       } else {
         nextType = 'curve';
@@ -761,7 +762,7 @@
 
   function roadBoundsAtScreenY(screenY) {
     const { center, nx } = roadNormalAtScreenY(screenY);
-    const absNx = Math.max(0.32, Math.abs(nx));
+    const absNx = Math.max(CURVE_NORMAL_MIN, Math.abs(nx));
     const desiredHalf = (ROAD_WIDTH / 2) / absNx;
     const edge = getViewportEdgeMarginsInternal();
     const playableWidth = W - edge.left - edge.right;
