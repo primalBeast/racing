@@ -59,8 +59,9 @@
   const ENGINE_PITCH_SCALE = 0.34;
   const ENGINE_FILTER_SCALE = 0.38;
 
-  const ROAD_WIDTH_RATIO = 0.9;
-  let ROAD_WIDTH = W * ROAD_WIDTH_RATIO;
+  const ROAD_CAR_WIDTHS = 6;
+  const REFERENCE_CAR_WIDTH = CAR_TYPES[0].width;
+  let ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
   const CURVE_AMPLITUDE_RATIO = 0.1;
   let CURVE_AMPLITUDE = W * CURVE_AMPLITUDE_RATIO;
   const STRAIGHT_SEGMENT_MIN = 520;
@@ -245,7 +246,7 @@
   };
 
   function syncCanvasMetrics() {
-    ROAD_WIDTH = W * ROAD_WIDTH_RATIO;
+    ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
     CURVE_AMPLITUDE = W * CURVE_AMPLITUDE_RATIO;
   }
 
@@ -700,14 +701,35 @@
     return obs.y + obs.height * 0.4 > player.y + player.height * 0.45;
   }
 
-  function roadBoundsAtScreenY(screenY) {
+  function roadNormalAtScreenY(screenY) {
+    const sample = Math.max(4, roadStep * 2);
+    const yAbove = Math.max(0, screenY - sample);
+    const yBelow = Math.min(H, screenY + sample);
     const center = roadCenterAtScreenY(screenY);
-    const halfW = ROAD_WIDTH / 2;
+    const centerAbove = roadCenterAtScreenY(yAbove);
+    const centerBelow = roadCenterAtScreenY(yBelow);
+    const tx = centerBelow - centerAbove;
+    const ty = yBelow - yAbove;
+    const len = Math.hypot(tx, ty) || 1;
     return {
-      left: center - halfW,
-      right: center + halfW,
       center,
-      width: ROAD_WIDTH,
+      nx: ty / len,
+      ny: -tx / len,
+    };
+  }
+
+  function roadBoundsAtScreenY(screenY) {
+    const { center, nx } = roadNormalAtScreenY(screenY);
+    // Keep perpendicular width at ROAD_WIDTH; widen horizontal span on curves.
+    const absNx = Math.max(0.32, Math.abs(nx));
+    const horizontalHalf = (ROAD_WIDTH / 2) / absNx;
+    const left = center - horizontalHalf;
+    const right = center + horizontalHalf;
+    return {
+      left,
+      right,
+      center,
+      width: horizontalHalf * 2,
     };
   }
 
