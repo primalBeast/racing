@@ -21,8 +21,11 @@
 
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-  const W = canvas.width;
-  const H = canvas.height;
+  const BASE_W = canvas.width;
+  const BASE_H = canvas.height;
+  let W = BASE_W;
+  let H = BASE_H;
+  let playerScreenY = H - 110;
 
   const CAR_TYPES = window.CAR_TYPES;
   if (!CAR_TYPES || !CAR_TYPES.length) {
@@ -49,9 +52,9 @@
   const WALL_SCORE_PENALTY = 45;
   const ENGINE_PITCH_SCALE = 0.34;
   const ENGINE_FILTER_SCALE = 0.38;
-  const PLAYER_Y = H - 110;
-  const ROAD_WIDTH = W * 0.34;
-  const CURVE_AMPLITUDE = W * 0.18;
+
+  let ROAD_WIDTH = W * 0.34;
+  let CURVE_AMPLITUDE = W * 0.18;
   const STRAIGHT_SEGMENT_MIN = 480;
   const STRAIGHT_SEGMENT_MAX = 950;
   const CURVE_SEGMENT_MIN = 300;
@@ -59,7 +62,11 @@
   const SPEED_TO_KMH = 15;
   const TRAFFIC_KMH_MIN = 60;
   const TRAFFIC_KMH_MAX = 120;
-  const ROAD_STEP = 2;
+  const FIXED_DT = 1 / 60;
+  const MAX_FRAME_DT = 0.25;
+  const MAX_SIM_SUBSTEPS = 20;
+  let roadStep = 2;
+  let simAccumulator = 0;
   const STATE = { LOADING: 0, TITLE: 1, COUNTDOWN: 2, PLAYING: 3, GAMEOVER: 4 };
   const COUNTDOWN_DURATION = 3;
   const TRAFFIC_MAX_SPEED_RATIO = 0.84;
@@ -107,7 +114,7 @@
 
   let player = {
     x: W / 2,
-    y: PLAYER_Y,
+    y: playerScreenY,
     width: CAR_TYPES[0].width,
     height: CAR_TYPES[0].height,
     angle: 0,
@@ -151,12 +158,192 @@
   let lastTime = 0;
   let animFrame = 0;
   let roadCurveAnchors = [];
+  let perfProfile = {
+    tier: 'high',
+    renderScale: 1,
+    roadStep: 2,
+    rainCount: 120,
+    shadows: true,
+    themeParticles: true,
+    showLegendDefault: true,
+    bgImageFilter: true,
+    particleCap: 90,
+    spinoutSparks: true,
+    snowCount: 110,
+    imageSmoothing: 'high',
+  };
+
+  const PERF_PROFILES = {
+    high: {
+      tier: 'high',
+      renderScale: 1,
+      roadStep: 2,
+      rainCount: 120,
+      shadows: true,
+      themeParticles: true,
+      showLegendDefault: true,
+      bgImageFilter: true,
+      particleCap: 90,
+      spinoutSparks: true,
+      snowCount: 110,
+      imageSmoothing: 'high',
+    },
+    medium: {
+      tier: 'medium',
+      renderScale: 0.82,
+      roadStep: 4,
+      rainCount: 70,
+      shadows: true,
+      themeParticles: true,
+      showLegendDefault: false,
+      bgImageFilter: true,
+      particleCap: 60,
+      spinoutSparks: true,
+      snowCount: 70,
+      imageSmoothing: 'medium',
+    },
+    low: {
+      tier: 'low',
+      renderScale: 0.62,
+      roadStep: 6,
+      rainCount: 40,
+      shadows: false,
+      themeParticles: false,
+      showLegendDefault: false,
+      bgImageFilter: false,
+      particleCap: 35,
+      spinoutSparks: false,
+      snowCount: 40,
+      imageSmoothing: 'low',
+    },
+    ultralow: {
+      tier: 'ultralow',
+      renderScale: 0.5,
+      roadStep: 8,
+      rainCount: 24,
+      shadows: false,
+      themeParticles: false,
+      showLegendDefault: false,
+      bgImageFilter: false,
+      particleCap: 24,
+      spinoutSparks: false,
+      snowCount: 24,
+      imageSmoothing: 'low',
+    },
+  };
+
+  function syncCanvasMetrics() {
+    ROAD_WIDTH = W * 0.34;
+    CURVE_AMPLITUDE = W * 0.18;
+  }
 
   function setLoadingProgress(loaded, total, label) {
     const fill = document.getElementById('loading-fill');
     const text = document.querySelector('.loading-text');
     if (fill) fill.style.width = `${(loaded / total) * 100}%`;
     if (text) text.textContent = label || `LOADING ${loaded}/${total}`;
+  }
+
+  function isMobileDevice() {
+    return window.matchMedia('(hover: none) and (pointer: coarse)').matches
+      || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  }
+
+  function selectPerformanceTier(avgFrameMs, isMobile) {
+    let tier = 'ultralow';
+    if (avgFrameMs < 9) tier = 'high';
+    else if (avgFrameMs < 16) tier = 'medium';
+    else if (avgFrameMs < 26) tier = 'low';
+
+    if (isMobile) {
+      if (tier === 'high') tier = 'medium';
+      else if (tier === 'medium') tier = 'low';
+      else if (tier === 'low') tier = 'ultralow';
+    }
+    if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4 && tier === 'high') {
+      tier = 'medium';
+    }
+    return tier;
+  }
+
+  function applyPerformanceProfile(profile) {
+    perfProfile = { ...profile };
+    roadStep = perfProfile.roadStep;
+    W = Math.max(640, Math.round(BASE_W * perfProfile.renderScale));
+    H = Math.max(360, Math.round(BASE_H * perfProfile.renderScale));
+    canvas.width = W;
+    canvas.height = H;
+    playerScreenY = H - 110;
+    player.y = playerScreenY;
+    player.x = Math.min(Math.max(player.x, W * 0.1), W * 0.9);
+    syncCanvasMetrics();
+    ctx.imageSmoothingEnabled = true;
+    if ('imageSmoothingQuality' in ctx) {
+      ctx.imageSmoothingQuality = perfProfile.imageSmoothing;
+    }
+    resizeCanvas();
+  }
+
+  function runPerformanceBenchmark() {
+    const sampleCar = images[CAR_TYPES[0].id];
+    const bgImg = activeTheme && activeTheme.image
+      ? images[`bg-${activeTheme.id}`]
+      : null;
+    const samples = [];
+    const targetFrames = 42;
+
+    return new Promise((resolve) => {
+      let frames = 0;
+
+      function benchFrame() {
+        const t0 = performance.now();
+        ctx.fillStyle = '#080812';
+        ctx.fillRect(0, 0, W, H);
+
+        if (bgImg) {
+          const scale = Math.max(W / bgImg.width, H / bgImg.height);
+          const dw = bgImg.width * scale;
+          const dh = bgImg.height * scale;
+          const dx = (W - dw) / 2;
+          ctx.drawImage(bgImg, dx, 0, dw, dh);
+        }
+
+        for (let y = 0; y <= H; y += 2) {
+          const left = W * 0.33;
+          ctx.fillStyle = `rgb(${19 + (y % 5)}, ${21 + (y % 4)}, ${30 + (y % 6)})`;
+          ctx.fillRect(left, y, W * 0.34, 3);
+        }
+
+        if (sampleCar) {
+          for (let i = 0; i < 7; i++) {
+            ctx.drawImage(sampleCar, 180 + i * 95, 90 + (i % 3) * 70, 58, 34);
+          }
+        }
+
+        for (let i = 0; i < 40; i++) {
+          ctx.fillStyle = 'rgba(150, 200, 255, 0.25)';
+          ctx.fillRect(Math.random() * W, Math.random() * H, 1, 8);
+        }
+
+        samples.push(performance.now() - t0);
+        frames += 1;
+        if (frames < targetFrames) {
+          requestAnimationFrame(benchFrame);
+        } else {
+          const avgFrameMs = samples.reduce((sum, n) => sum + n, 0) / samples.length;
+          resolve({ avgFrameMs, isMobile: isMobileDevice() });
+        }
+      }
+
+      requestAnimationFrame(benchFrame);
+    });
+  }
+
+  function trimParticles() {
+    const cap = perfProfile.particleCap;
+    if (particles.length > cap) {
+      particles.splice(0, particles.length - cap);
+    }
   }
 
   function loadImage(key, src, timeoutMs = 15000) {
@@ -229,7 +416,16 @@
     }
 
     results.forEach(({ key, img }) => { images[key] = img; });
-    themeParticles = activeTheme.initParticles ? activeTheme.initParticles(W, H) : [];
+
+    setLoadingProgress(total, total, 'TESTING DEVICE SPEED...');
+    const bench = await runPerformanceBenchmark();
+    const tier = selectPerformanceTier(bench.avgFrameMs, bench.isMobile);
+    applyPerformanceProfile(PERF_PROFILES[tier]);
+    themeParticles = perfProfile.themeParticles && activeTheme.initParticles
+      ? activeTheme.initParticles(W, H)
+      : [];
+    initRain();
+
     document.getElementById('title-bg').style.backgroundImage = `url(${ASSETS.titleScreen})`;
     document.getElementById('loading').classList.add('hidden');
     showTitle();
@@ -282,7 +478,7 @@
   function initRoadCurve() {
     roadCurveAnchors = [
       { wy: 0, offset: 0, type: 'straight' },
-      { wy: H - PLAYER_Y, offset: 0, type: 'straight' },
+      { wy: H - playerScreenY, offset: 0, type: 'straight' },
     ];
     ensureRoadCurveUpTo(20000);
   }
@@ -505,7 +701,7 @@
   function buildRoadClipPath() {
     const leftPts = [];
     const rightPts = [];
-    for (let y = 0; y <= H; y += ROAD_STEP) {
+    for (let y = 0; y <= H; y += roadStep) {
       const bounds = roadBoundsAtScreenY(y);
       leftPts.push({ x: bounds.left, y });
       rightPts.push({ x: bounds.right, y });
@@ -602,7 +798,7 @@
 
     player = {
       x: W / 2,
-      y: PLAYER_Y,
+      y: playerScreenY,
       width: activeCar.width,
       height: activeCar.height,
       angle: 0,
@@ -639,8 +835,9 @@
     themeBannerTimer = 3.2;
     pickupSpawnTimer = 2.5;
     driftSparkTimer = 0;
-    showLegend = true;
+    showLegend = perfProfile.showLegendDefault;
     lastTime = performance.now();
+    simAccumulator = 0;
     initRoadCurve();
     weatherType = pickWeather(activeTheme);
     if (weatherType === 'snow') initWeatherSnow();
@@ -664,7 +861,8 @@
 
   function initRain() {
     rainDrops = [];
-    for (let i = 0; i < 120; i++) {
+    const count = perfProfile.rainCount;
+    for (let i = 0; i < count; i++) {
       rainDrops.push({
         x: Math.random() * W,
         y: Math.random() * H,
@@ -701,7 +899,8 @@
 
   function initWeatherSnow() {
     weatherSnowflakes = [];
-    for (let i = 0; i < 110; i++) {
+    const count = perfProfile.snowCount || 110;
+    for (let i = 0; i < count; i++) {
       weatherSnowflakes.push({
         x: Math.random() * W,
         y: Math.random() * H,
@@ -1692,7 +1891,7 @@
         obs.spinOutTimer -= dt;
         obs.angle += obs.spinOutRate * dt;
         obs.spinOutRate *= 1 - dt * 0.42;
-        if (animFrame % 3 === 0) {
+        if (perfProfile.spinoutSparks && animFrame % 3 === 0) {
           spawnSpinoutSparks(obs.x, obs.y + obs.height * 0.55);
         }
       } else {
@@ -1760,13 +1959,17 @@
     });
     floatingTexts = floatingTexts.filter((ft) => ft.life > 0);
 
+    trimParticles();
     updateEngineSound();
   }
 
   function drawBackground() {
     if (activeTheme && window.drawThemeBackground) {
       const bgImg = images[`bg-${activeTheme.id}`] || null;
+      const savedFilter = activeTheme.imageFilter;
+      if (!perfProfile.bgImageFilter) activeTheme.imageFilter = null;
       window.drawThemeBackground(ctx, W, H, bgOffset, activeTheme, bgImg);
+      activeTheme.imageFilter = savedFilter;
       if (activeTheme.drawParticles && themeParticles.length) {
         activeTheme.drawParticles(ctx, themeParticles);
       }
@@ -1785,8 +1988,10 @@
     ctx.save();
     ctx.strokeStyle = 'rgba(210, 220, 235, 0.85)';
     ctx.lineWidth = 3;
-    ctx.shadowColor = '#8be9ff';
-    ctx.shadowBlur = 6;
+    if (perfProfile.shadows) {
+      ctx.shadowColor = '#8be9ff';
+      ctx.shadowBlur = 6;
+    }
     ctx.beginPath();
     points.forEach((p, i) => {
       const x = p.x + offset;
@@ -1814,13 +2019,13 @@
   }
 
   function drawSpeedStrips() {
-    for (let y = 0; y <= H; y += ROAD_STEP) {
+    for (let y = 0; y <= H; y += roadStep) {
       const wy = worldYAtScreenY(y);
       if (!isOnSpeedStrip(wy)) continue;
       const bounds = roadBoundsAtScreenY(y);
       const pulse = 0.25 + Math.sin(wy * 0.08 + animFrame * 0.12) * 0.15;
       ctx.fillStyle = `rgba(80, 255, 160, ${pulse})`;
-      ctx.fillRect(bounds.left + 8, y, ROAD_WIDTH - 16, ROAD_STEP + 0.5);
+      ctx.fillRect(bounds.left + 8, y, ROAD_WIDTH - 16, roadStep + 0.5);
     }
   }
 
@@ -1912,7 +2117,7 @@
     const leftEdge = [];
     const rightEdge = [];
     const laneLines = Array.from({ length: LANE_COUNT - 1 }, () => []);
-    for (let y = 0; y <= H; y += ROAD_STEP) {
+    for (let y = 0; y <= H; y += roadStep) {
       const bounds = roadBoundsAtScreenY(y);
       leftEdge.push({ x: bounds.left, y });
       rightEdge.push({ x: bounds.right, y });
@@ -1946,32 +2151,32 @@
   }
 
   function drawRoadSurface() {
-    for (let y = 0; y <= H; y += ROAD_STEP) {
+    for (let y = 0; y <= H; y += roadStep) {
       const bounds = roadBoundsAtScreenY(y);
       const wy = worldYAtScreenY(y);
       const grain = Math.sin(wy * 0.014) * 2.5 + Math.sin(wy * 0.067 + 0.8) * 1.5;
       const wet = Math.sin(wy * 0.031 + roadOffset * 0.06) * 4;
       const base = 19 + grain + wet * 0.25;
       ctx.fillStyle = `rgb(${base | 0}, ${(base + 2) | 0}, ${(base + 11) | 0})`;
-      ctx.fillRect(bounds.left, y, ROAD_WIDTH, ROAD_STEP + 0.5);
+      ctx.fillRect(bounds.left, y, ROAD_WIDTH, roadStep + 0.5);
 
       const shimmer = (Math.sin(wy * 0.022 + roadOffset * 0.04) + 1) * 0.5;
       const wetBoost = weatherType === 'rain' ? 0.12 : 0;
       if (shimmer + wetBoost > 0.82) {
         ctx.fillStyle = `rgba(90, 170, 210, ${(shimmer + wetBoost - 0.82) * 0.42})`;
-        ctx.fillRect(bounds.left + ROAD_WIDTH * 0.08, y, ROAD_WIDTH * 0.84, ROAD_STEP + 0.5);
+        ctx.fillRect(bounds.left + ROAD_WIDTH * 0.08, y, ROAD_WIDTH * 0.84, roadStep + 0.5);
       }
     }
 
     const edgeInset = 5;
-    for (let y = 0; y <= H; y += ROAD_STEP) {
+    for (let y = 0; y <= H; y += roadStep) {
       const bounds = roadBoundsAtScreenY(y);
       const wy = worldYAtScreenY(y);
       const edgePhase = wy % 44;
       if (edgePhase < 22) {
         ctx.fillStyle = 'rgba(255, 225, 77, 0.45)';
-        ctx.fillRect(bounds.left + edgeInset, y, 3, ROAD_STEP + 0.5);
-        ctx.fillRect(bounds.right - edgeInset - 3, y, 3, ROAD_STEP + 0.5);
+        ctx.fillRect(bounds.left + edgeInset, y, 3, roadStep + 0.5);
+        ctx.fillRect(bounds.right - edgeInset - 3, y, 3, roadStep + 0.5);
       }
     }
   }
@@ -2001,7 +2206,7 @@
 
   function drawSprite(img, x, y, width, height, glowColor, flipVertical = false, angle = 0) {
     ctx.save();
-    if (glowColor) {
+    if (glowColor && perfProfile.shadows) {
       ctx.shadowColor = glowColor;
       ctx.shadowBlur = 14;
     }
@@ -2306,8 +2511,10 @@
     particles.forEach((p) => {
       ctx.globalAlpha = p.life;
       ctx.fillStyle = p.color;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 8;
+      if (perfProfile.shadows) {
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 8;
+      }
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
       ctx.fill();
@@ -2614,7 +2821,6 @@
         (Math.random() - 0.5) * shake,
         (Math.random() - 0.5) * shake
       );
-      shakeTimer--;
     }
 
     ctx.clearRect(0, 0, W, H);
@@ -2645,12 +2851,27 @@
   }
 
   function gameLoop(timestamp) {
-    const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+    if (!lastTime) lastTime = timestamp;
+    let frameDt = (timestamp - lastTime) / 1000;
     lastTime = timestamp;
+    if (frameDt > MAX_FRAME_DT) frameDt = MAX_FRAME_DT;
 
-    update(dt);
+    simAccumulator += frameDt;
+    let steps = 0;
+    while (simAccumulator >= FIXED_DT && steps < MAX_SIM_SUBSTEPS) {
+      update(FIXED_DT);
+      simAccumulator -= FIXED_DT;
+      steps += 1;
+    }
+    if (steps === MAX_SIM_SUBSTEPS && simAccumulator >= FIXED_DT) {
+      simAccumulator = 0;
+    }
+
+    if (shakeTimer > 0) {
+      shakeTimer = Math.max(0, shakeTimer - frameDt * 60);
+    }
+
     render();
-
     requestAnimationFrame(gameLoop);
   }
 
