@@ -3036,6 +3036,42 @@
     c.closePath();
   }
 
+  function drawEdgeMarginDebugMarkers() {
+    const flash = 0.45 + Math.sin(animFrame * 0.22) * 0.45;
+    const markerX = [ROAD_EDGE_MARGIN, W - ROAD_EDGE_MARGIN];
+    const centerY = H / 2;
+    const lineHalf = Math.min(180, H * 0.22);
+
+    ctx.save();
+    markerX.forEach((x) => {
+      ctx.globalAlpha = flash;
+      ctx.strokeStyle = '#ffe14d';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.moveTo(x, centerY - lineHalf);
+      ctx.lineTo(x, centerY + lineHalf);
+      ctx.stroke();
+
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#ff2d95';
+      ctx.shadowColor = '#ffe14d';
+      ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.arc(x, centerY, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 12px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('100px', x, centerY - lineHalf - 18);
+    });
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   function render() {
     ctx.save();
 
@@ -3070,6 +3106,7 @@
         drawHUD();
         if (showLegend) drawLegend();
       }
+      drawEdgeMarginDebugMarkers();
     }
 
     ctx.restore();
