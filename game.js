@@ -69,6 +69,8 @@
   const TRAFFIC_MIN_GAP = 1.2;
   const TRAFFIC_LANE_SMOOTH = 10;
   const TRAFFIC_COLLISION_COOLDOWN = 0.4;
+  const SPINOUT_DURATION = 1.4;
+  const SPINOUT_RATE = 9;
   const TRAFFIC_LEAD_MIN = 680;
   const TRAFFIC_LEAD_APPROACH_SCALE = 24;
   const TRAFFIC_CULL_ABOVE = 1100;
@@ -1236,6 +1238,38 @@
     return { midX, midY };
   }
 
+  function triggerTrafficSpinOut(obs, pushDir, currentSpeed) {
+    obs.spinOutTimer = SPINOUT_DURATION + Math.random() * 0.45;
+    obs.spinOutRate = pushDir * (SPINOUT_RATE + Math.random() * 4);
+    obs.vx = (obs.vx || 0) + pushDir * BOUNCE_STRENGTH * 2.6;
+    obs.vy = (obs.vy || 0) + (Math.random() - 0.35) * 2.4;
+    obs.speed = Math.max(
+      kmhToSpeed(TRAFFIC_KMH_MIN * 0.45),
+      obs.speed - currentSpeed * 0.12
+    );
+    obs.laneFraction = Math.max(
+      0.04,
+      Math.min(0.96, obs.laneFraction + pushDir * 0.1)
+    );
+  }
+
+  function spawnSpinoutSparks(x, y) {
+    for (let i = 0; i < 10; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const spd = 1.5 + Math.random() * 4;
+      particles.push({
+        x: x + (Math.random() - 0.5) * 20,
+        y: y + (Math.random() - 0.5) * 14,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd,
+        life: 1,
+        decay: 0.05 + Math.random() * 0.04,
+        color: Math.random() > 0.5 ? '#ffe14d' : '#ff8c3a',
+        size: 2 + Math.random() * 3,
+      });
+    }
+  }
+
   function damagePlayer(obs, currentSpeed) {
     if (playerInvulnTimer > 0) return false;
 
@@ -1245,7 +1279,8 @@
     const { midX, midY } = bounceCars(player, obs, depth, currentSpeed);
     const pushDir = player.x < obs.x ? -1 : 1;
     player.vx += pushDir * BOUNCE_STRENGTH * 1.4;
-    obs.vx = (obs.vx || 0) - pushDir * BOUNCE_STRENGTH * 0.8;
+    triggerTrafficSpinOut(obs, -pushDir, currentSpeed);
+    spawnSpinoutSparks(midX, midY);
 
     hitPoints -= 1;
     playerInvulnTimer = PLAYER_HIT_INVULN;
@@ -1349,6 +1384,7 @@
     }
 
     obstacles.forEach((obs) => {
+      if (obs.spinOutTimer > 0) return;
       const centerY = obs.y + obs.height * 0.52;
       const laneX = laneXFromFraction(centerY, obs.laneFraction);
       const maxDrift = obs.width * 0.22;
@@ -1382,6 +1418,8 @@
       vx: 0,
       vy: 0,
       hitCooldown: 0,
+      spinOutTimer: 0,
+      spinOutRate: 0,
     });
   }
 
@@ -1549,13 +1587,23 @@
       obs.vy = applyBounceDamping(obs.vy || 0, dt);
       const centerY = obs.y + obs.height * 0.52;
       const targetX = laneXFromFraction(centerY, obs.laneFraction);
-      const laneBlend = Math.min(1, TRAFFIC_LANE_SMOOTH * dt);
+      const spinning = obs.spinOutTimer > 0;
+      const laneBlend = Math.min(1, TRAFFIC_LANE_SMOOTH * dt * (spinning ? 0.12 : 1));
       obs.x += (targetX - obs.x) * laneBlend;
 
       const forwardVel = Math.abs(currentSpeed - obs.speed) + 0.5;
       const lateralVel = (obs.x - obs.prevX) / Math.max(dt, 0.001);
-      const steerHint = Math.max(-1, Math.min(1, lateralVel / (forwardVel * 28)));
-      updateCarAngle(obs, lateralVel, forwardVel, steerHint, dt);
+      if (spinning) {
+        obs.spinOutTimer -= dt;
+        obs.angle += obs.spinOutRate * dt;
+        obs.spinOutRate *= 1 - dt * 0.42;
+        if (animFrame % 3 === 0) {
+          spawnSpinoutSparks(obs.x, obs.y + obs.height * 0.55);
+        }
+      } else {
+        const steerHint = Math.max(-1, Math.min(1, lateralVel / (forwardVel * 28)));
+        updateCarAngle(obs, lateralVel, forwardVel, steerHint, dt);
+      }
 
       if (!obs.passed && obs.y + obs.height * 0.5 > player.y + player.height * 0.5) {
         obs.passed = true;
