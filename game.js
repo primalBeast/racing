@@ -57,7 +57,8 @@
   const ENGINE_PITCH_SCALE = 0.34;
   const ENGINE_FILTER_SCALE = 0.38;
 
-  let ROAD_WIDTH = W * 0.34;
+  const ROAD_WIDTH_RATIO = 0.38;
+  let ROAD_WIDTH = W * ROAD_WIDTH_RATIO;
   let CURVE_AMPLITUDE = W * 0.18;
   const STRAIGHT_SEGMENT_MIN = 480;
   const STRAIGHT_SEGMENT_MAX = 950;
@@ -241,7 +242,7 @@
   };
 
   function syncCanvasMetrics() {
-    ROAD_WIDTH = W * 0.34;
+    ROAD_WIDTH = W * ROAD_WIDTH_RATIO;
     CURVE_AMPLITUDE = W * 0.18;
   }
 
