@@ -700,35 +700,14 @@
     return obs.y + obs.height * 0.4 > player.y + player.height * 0.45;
   }
 
-  function roadNormalAtScreenY(screenY) {
-    const sample = Math.max(4, roadStep * 2);
-    const yAbove = Math.max(0, screenY - sample);
-    const yBelow = Math.min(H, screenY + sample);
-    const center = roadCenterAtScreenY(screenY);
-    const centerAbove = roadCenterAtScreenY(yAbove);
-    const centerBelow = roadCenterAtScreenY(yBelow);
-    const tx = centerBelow - centerAbove;
-    const ty = yBelow - yAbove;
-    const len = Math.hypot(tx, ty) || 1;
-    return {
-      center,
-      nx: ty / len,
-      ny: -tx / len,
-    };
-  }
-
   function roadBoundsAtScreenY(screenY) {
-    const { center, nx } = roadNormalAtScreenY(screenY);
-    // Keep perpendicular width at ROAD_WIDTH; widen horizontal span on curves.
-    const absNx = Math.max(0.32, Math.abs(nx));
-    const horizontalHalf = (ROAD_WIDTH / 2) / absNx;
-    const left = center - horizontalHalf;
-    const right = center + horizontalHalf;
+    const center = roadCenterAtScreenY(screenY);
+    const halfW = ROAD_WIDTH / 2;
     return {
-      left,
-      right,
+      left: center - halfW,
+      right: center + halfW,
       center,
-      width: horizontalHalf * 2,
+      width: ROAD_WIDTH,
     };
   }
 
