@@ -63,8 +63,7 @@
   const REFERENCE_CAR_WIDTH = CAR_TYPES[0].width;
   const ROAD_EDGE_MARGIN = 100;
   let ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
-  const CURVE_AMPLITUDE_RATIO = 0.1;
-  let CURVE_AMPLITUDE = W * CURVE_AMPLITUDE_RATIO;
+  let CURVE_AMPLITUDE = 0;
   const STRAIGHT_SEGMENT_MIN = 520;
   const STRAIGHT_SEGMENT_MAX = 1050;
   const CURVE_SEGMENT_MIN = 520;
@@ -246,9 +245,25 @@
     },
   };
 
+  function getMaxRoadHalfWidth() {
+    const absNx = 0.32;
+    const desiredHalf = (ROAD_WIDTH / 2) / absNx;
+    const edge = getViewportEdgeMarginsInternal();
+    const playableWidth = W - edge.left - edge.right;
+    return Math.min(desiredHalf, playableWidth / 2);
+  }
+
+  function getMaxCurveOffset() {
+    const edge = getViewportEdgeMarginsInternal();
+    const halfW = getMaxRoadHalfWidth();
+    const leftOffset = Math.abs(edge.left + halfW - W / 2);
+    const rightOffset = Math.abs((W - edge.right - halfW) - W / 2);
+    return Math.max(leftOffset, rightOffset, ROAD_WIDTH);
+  }
+
   function syncCanvasMetrics() {
     ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
-    CURVE_AMPLITUDE = W * CURVE_AMPLITUDE_RATIO;
+    CURVE_AMPLITUDE = getMaxCurveOffset();
   }
 
   function setLoadingProgress(loaded, total, label) {
@@ -495,14 +510,14 @@
 
   function pickCurveTarget(currentOffset) {
     const roll = Math.random();
-    if (roll < 0.45) {
+    if (roll < 0.4) {
       const sign = currentOffset > 0 ? -1 : 1;
-      return sign * CURVE_AMPLITUDE * (0.35 + Math.random() * 0.2);
+      return sign * CURVE_AMPLITUDE * (0.82 + Math.random() * 0.18);
     }
-    if (roll < 0.78) {
-      return (Math.random() < 0.5 ? -1 : 1) * CURVE_AMPLITUDE * (0.25 + Math.random() * 0.25);
+    if (roll < 0.72) {
+      return (Math.random() < 0.5 ? -1 : 1) * CURVE_AMPLITUDE * (0.55 + Math.random() * 0.35);
     }
-    return currentOffset * 0.4;
+    return currentOffset * 0.45;
   }
 
   function appendRoadSegment(last, type) {
