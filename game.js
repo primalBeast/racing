@@ -21,11 +21,13 @@
 
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-  const BASE_W = canvas.width;
-  const BASE_H = canvas.height;
+  const REF_ASPECT = 16 / 9;
+  const PLAYER_Y_INSET_RATIO = 110 / 720;
+  let BASE_W = canvas.width;
+  let BASE_H = canvas.height;
   let W = BASE_W;
   let H = BASE_H;
-  let playerScreenY = H - 110;
+  let playerScreenY = H - Math.round(H * PLAYER_Y_INSET_RATIO);
 
   const CAR_TYPES = window.CAR_TYPES;
   if (!CAR_TYPES || !CAR_TYPES.length) {
@@ -278,19 +280,15 @@
   function applyPerformanceProfile(profile) {
     perfProfile = { ...profile };
     roadStep = perfProfile.roadStep;
-    W = Math.max(640, Math.round(BASE_W * perfProfile.renderScale));
-    H = Math.max(360, Math.round(BASE_H * perfProfile.renderScale));
-    canvas.width = W;
-    canvas.height = H;
-    playerScreenY = H - 110;
-    player.y = playerScreenY;
-    player.x = Math.min(Math.max(player.x, W * 0.1), W * 0.9);
-    syncCanvasMetrics();
-    ctx.imageSmoothingEnabled = true;
-    if ('imageSmoothingQuality' in ctx) {
-      ctx.imageSmoothingQuality = perfProfile.imageSmoothing;
-    }
     resizeCanvas();
+  }
+
+  function syncPlayerScreenY() {
+    playerScreenY = H - Math.round(H * PLAYER_Y_INSET_RATIO);
+    if (player) {
+      player.y = playerScreenY;
+      player.x = Math.min(Math.max(player.x, W * 0.1), W * 0.9);
+    }
   }
 
   function runPerformanceBenchmark() {
@@ -3139,16 +3137,24 @@
 
   function resizeCanvas() {
     const container = document.getElementById('game-container');
-    const aspect = W / H;
-    const cW = container.clientWidth;
-    const cH = container.clientHeight;
+    if (!container) return;
 
-    if (cW / cH > aspect) {
-      canvas.style.width = `${cH * aspect}px`;
-      canvas.style.height = `${cH}px`;
-    } else {
-      canvas.style.width = `${cW}px`;
-      canvas.style.height = `${cW / aspect}px`;
+    const cH = container.clientHeight;
+    BASE_H = Math.max(360, cH);
+    BASE_W = Math.max(640, Math.round(BASE_H * REF_ASPECT));
+
+    W = Math.max(640, Math.round(BASE_W * perfProfile.renderScale));
+    H = Math.max(360, Math.round(BASE_H * perfProfile.renderScale));
+    canvas.width = W;
+    canvas.height = H;
+    canvas.style.width = `${BASE_W}px`;
+    canvas.style.height = `${BASE_H}px`;
+
+    syncCanvasMetrics();
+    syncPlayerScreenY();
+    ctx.imageSmoothingEnabled = true;
+    if ('imageSmoothingQuality' in ctx) {
+      ctx.imageSmoothingQuality = perfProfile.imageSmoothing;
     }
   }
 
