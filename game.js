@@ -46,6 +46,9 @@
   const DIFFICULTY_RAMP_DISTANCE = 9000;
   const MAX_SPEED_KMH = 200;
   const NITRO_MAX_SPEED_KMH = 300;
+  const NITRO_SPEED_BONUS_KMH = NITRO_MAX_SPEED_KMH - MAX_SPEED_KMH;
+  const NITRO_SPEED_RAMP_UP = 120;
+  const NITRO_SPEED_RAMP_DOWN = 160;
   const LAUNCH_SPEED_KMH = 100;
   const SPEED_PHASE1_DURATION = 1.5;
   const SPEED_PHASE2_DURATION = 36;
@@ -151,6 +154,8 @@
   let score = 0;
   let distance = 0;
   let speed = 0;
+  let nitroSpeedBonusKmh = 0;
+  let hudSpeedKmh = 0;
   let nitro = 100;
   let nitroActive = false;
   let spawnTimer = 0;
@@ -579,14 +584,28 @@
     return LAUNCH_SPEED_KMH + (maxKmh - LAUNCH_SPEED_KMH) * eased;
   }
 
-  function currentTargetKmh() {
+  function baseTargetKmh() {
     const stripMult = speedBoostTimer > 0 ? 1.1 : 1;
-    const maxKmh = nitroActive ? NITRO_MAX_SPEED_KMH : MAX_SPEED_KMH;
-    return Math.min(maxKmh, targetSpeedKmh(raceTime, maxKmh)) * stripMult;
+    return Math.min(MAX_SPEED_KMH, targetSpeedKmh(raceTime, MAX_SPEED_KMH)) * stripMult;
+  }
+
+  function currentTargetKmh() {
+    return baseTargetKmh() + nitroSpeedBonusKmh;
+  }
+
+  function updateNitroSpeedBonus(dt) {
+    const bonusTarget = nitroActive ? NITRO_SPEED_BONUS_KMH : 0;
+    const ramp = nitroActive ? NITRO_SPEED_RAMP_UP : NITRO_SPEED_RAMP_DOWN;
+    if (nitroSpeedBonusKmh < bonusTarget) {
+      nitroSpeedBonusKmh = Math.min(bonusTarget, nitroSpeedBonusKmh + dt * ramp);
+    } else if (nitroSpeedBonusKmh > bonusTarget) {
+      nitroSpeedBonusKmh = Math.max(bonusTarget, nitroSpeedBonusKmh - dt * ramp);
+    }
   }
 
   function updatePlayerSpeed(dt) {
     raceTime += dt;
+    updateNitroSpeedBonus(dt);
     const curveKmh = currentTargetKmh();
 
     if (speedPenaltyKmh > 0) {
@@ -602,7 +621,9 @@
       targetKmh = curveKmh - speedPenaltyKmh;
     }
 
-    speed = kmhToSpeed(Math.max(0, targetKmh));
+    targetKmh = Math.max(0, targetKmh);
+    speed = kmhToSpeed(targetKmh);
+    hudSpeedKmh += (targetKmh - hudSpeedKmh) * Math.min(1, dt * 10);
   }
 
   function effectiveSpeedKmh() {
@@ -822,6 +843,8 @@
     score = 0;
     distance = 0;
     speed = 0;
+    nitroSpeedBonusKmh = 0;
+    hudSpeedKmh = 0;
     raceTime = 0;
     speedPenaltyKmh = 0;
     recoveryTargetKmh = 0;
@@ -2840,17 +2863,17 @@
     if (themeBannerTimer > 0) return;
     const lighting = getDayNightLighting();
     const label = `${WEATHER_LABELS[weatherType]} · ${lighting.label}`;
-    const badgeW = 148;
+    const badgeW = 168;
     const badgeH = 22;
-    const x = (W - badgeW) / 2;
-    const y = 18;
+    const x = W - badgeW - 16;
+    const y = 10;
     ctx.save();
     ctx.globalAlpha = lighting.isNight ? 0.82 : 0.9;
     drawHudPanel(x, y, badgeW, badgeH, lighting.isNight ? 'rgba(120, 180, 255, 0.45)' : 'rgba(255, 225, 120, 0.4)', { compact: true });
     ctx.textAlign = 'center';
     ctx.font = '600 11px Rajdhani, sans-serif';
     ctx.fillStyle = lighting.isNight ? '#b8d8ff' : '#ffe8a8';
-    ctx.fillText(label, W / 2, y + 15);
+    ctx.fillText(label, x + badgeW / 2, y + 15);
     ctx.restore();
   }
 
@@ -2922,7 +2945,7 @@
     const panelW = 220;
     const panelH = 88;
     const panelY = 76;
-    const kmh = Math.floor(speedToKmh(speed));
+    const kmh = Math.round(hudSpeedKmh);
     const speedAccent = tints.speed;
     const scorePanelAccent = lighting.isNight ? 'rgba(120, 190, 255, 0.75)' : 'rgba(255, 225, 77, 0.85)';
 
