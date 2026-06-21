@@ -1941,7 +1941,8 @@
     updateCarAngle(player, lateralVel, kmhToSpeed(LAUNCH_SPEED_KMH), steerInput, dt, playerRoadLean());
     player.prevX = player.x;
 
-    countdownTimer -= dt;
+    const skipCountdown = keys[' '] || keys.Space;
+    countdownTimer -= dt * (skipCountdown ? 2 : 1);
     if (countdownTimer <= 0) {
       state = STATE.PLAYING;
       countdownTimer = 0;
