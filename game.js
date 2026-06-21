@@ -78,6 +78,7 @@
   const TRAFFIC_COLLISION_COOLDOWN = 0.4;
   const SPINOUT_DURATION = 1.4;
   const SPINOUT_RATE = 9;
+  const FATAL_CRASH_DURATION = 1.7;
   const TRAFFIC_LEAD_MIN = 680;
   const TRAFFIC_LEAD_APPROACH_SCALE = 24;
   const TRAFFIC_CULL_ABOVE = 1100;
@@ -154,6 +155,7 @@
   let spawnTimer = 0;
   let difficulty = 1;
   let shakeTimer = 0;
+  let fatalCrash = null;
   let countdownTimer = 0;
   let lastTime = 0;
   let animFrame = 0;
@@ -826,6 +828,7 @@
     spawnTimer = 0;
     difficulty = 1;
     shakeTimer = 0;
+    fatalCrash = null;
     pickups = [];
     floatingTexts = [];
     combo = 0;
@@ -850,7 +853,7 @@
   function gameOver() {
     state = STATE.GAMEOVER;
     stopEngineSound();
-    playCrashSound();
+    if (!fatalCrash) playCrashSound();
     document.getElementById('final-score').textContent = Math.floor(score).toLocaleString();
     document.getElementById('final-distance').textContent = Math.floor(distance).toLocaleString();
     const panel = document.getElementById('game-over-screen');
@@ -1254,6 +1257,35 @@
     osc.stop(audioCtx.currentTime + 0.5);
   }
 
+  function playExplosionSound() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+
+    const boom = audioCtx.createOscillator();
+    const boomGain = audioCtx.createGain();
+    boom.type = 'sawtooth';
+    boom.frequency.setValueAtTime(120, t);
+    boom.frequency.exponentialRampToValueAtTime(28, t + 0.55);
+    boomGain.gain.setValueAtTime(0.22, t);
+    boomGain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+    boom.connect(boomGain);
+    boomGain.connect(audioCtx.destination);
+    boom.start(t);
+    boom.stop(t + 0.7);
+
+    const crackle = audioCtx.createOscillator();
+    const crackleGain = audioCtx.createGain();
+    crackle.type = 'square';
+    crackle.frequency.setValueAtTime(900, t + 0.02);
+    crackle.frequency.exponentialRampToValueAtTime(120, t + 0.25);
+    crackleGain.gain.setValueAtTime(0.08, t + 0.02);
+    crackleGain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    crackle.connect(crackleGain);
+    crackleGain.connect(audioCtx.destination);
+    crackle.start(t + 0.02);
+    crackle.stop(t + 0.3);
+  }
+
   function playPassSound() {
     if (!audioCtx) return;
     const osc = audioCtx.createOscillator();
@@ -1589,6 +1621,7 @@
     addFloatingText(player.x, player.y - 62, `${hitPoints} HP LEFT`, '#ffffff');
 
     if (hitPoints <= 0) {
+      triggerFatalCrash(obs);
       gameOver();
     }
     return true;
@@ -1750,6 +1783,128 @@
     }
   }
 
+  function spawnCarExplosion(cx, cy, w, h, accent = '#ff8c3a') {
+    const palette = ['#fff4c8', '#ffe14d', '#ff8c3a', '#ff4d2d', '#ff2d95', accent, '#8a8a9a', '#3a3a48'];
+    const count = perfProfile.tier === 'ultralow' ? 36 : perfProfile.tier === 'low' ? 52 : 78;
+
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const spd = 2.5 + Math.random() * 11;
+      particles.push({
+        x: cx + (Math.random() - 0.5) * w * 0.9,
+        y: cy + (Math.random() - 0.5) * h * 0.75,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd - (1.5 + Math.random() * 3),
+        life: 0.75 + Math.random() * 0.55,
+        decay: 0.012 + Math.random() * 0.018,
+        color: palette[Math.floor(Math.random() * palette.length)],
+        size: 3 + Math.random() * 9,
+        gravity: 0.12 + Math.random() * 0.14,
+      });
+    }
+
+    for (let i = 0; i < 8; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const spd = 5 + Math.random() * 7;
+      particles.push({
+        x: cx + (Math.random() - 0.5) * w * 0.35,
+        y: cy + (Math.random() - 0.5) * h * 0.35,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd - 3,
+        life: 1,
+        decay: 0.03 + Math.random() * 0.02,
+        color: i % 2 === 0 ? '#ffffff' : accent,
+        size: 8 + Math.random() * 10,
+        gravity: 0.08,
+      });
+    }
+  }
+
+  function triggerFatalCrash(obs) {
+    const playerCx = player.x;
+    const playerCy = player.y + player.height * 0.45;
+    const obsCx = obs.x;
+    const obsCy = obs.y + obs.height * 0.45;
+
+    obs.exploded = true;
+    particles = [];
+    spawnCarExplosion(playerCx, playerCy, player.width, player.height, activeCar.glow || '#ff2d95');
+    spawnCarExplosion(obsCx, obsCy, obs.width, obs.height, obs.carType.glow || '#ff8c3a');
+
+    fatalCrash = {
+      obs,
+      timer: FATAL_CRASH_DURATION,
+      sites: [
+        { x: playerCx, y: playerCy, accent: activeCar.glow || '#ff2d95' },
+        { x: obsCx, y: obsCy, accent: obs.carType.glow || '#ff8c3a' },
+      ],
+    };
+
+    shakeTimer = Math.max(shakeTimer, 28);
+    playExplosionSound();
+    addFloatingText((playerCx + obsCx) / 2, (playerCy + obsCy) / 2 - 20, 'TOTALED!', '#ffffff');
+  }
+
+  function updateParticles(dt) {
+    particles.forEach((p) => {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.gravity) p.vy += p.gravity;
+      p.life -= p.decay;
+    });
+    particles = particles.filter((p) => p.life > 0);
+  }
+
+  function updateFatalCrash(dt) {
+    if (!fatalCrash) return;
+    fatalCrash.timer -= dt;
+    if (fatalCrash.timer <= 0) fatalCrash = null;
+  }
+
+  function drawFatalCrashExplosions() {
+    if (!fatalCrash) return;
+
+    const progress = 1 - fatalCrash.timer / FATAL_CRASH_DURATION;
+    fatalCrash.sites.forEach((site) => {
+      const flash = Math.max(0, 1 - progress * 5);
+      if (flash > 0) {
+        const flashGrad = ctx.createRadialGradient(site.x, site.y, 0, site.x, site.y, 42 + flash * 36);
+        flashGrad.addColorStop(0, `rgba(255, 255, 255, ${0.85 * flash})`);
+        flashGrad.addColorStop(0.35, `rgba(255, 230, 120, ${0.55 * flash})`);
+        flashGrad.addColorStop(1, 'rgba(255, 80, 40, 0)');
+        ctx.fillStyle = flashGrad;
+        ctx.beginPath();
+        ctx.arc(site.x, site.y, 42 + flash * 36, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const fireRadius = 18 + progress * 72;
+      const fireAlpha = Math.max(0, 0.72 * (1 - progress * 1.15));
+      if (fireAlpha <= 0) return;
+
+      const fireGrad = ctx.createRadialGradient(site.x, site.y, 0, site.x, site.y, fireRadius);
+      fireGrad.addColorStop(0, `rgba(255, 245, 210, ${fireAlpha})`);
+      fireGrad.addColorStop(0.28, `rgba(255, 170, 60, ${fireAlpha * 0.9})`);
+      fireGrad.addColorStop(0.62, `rgba(255, 70, 35, ${fireAlpha * 0.55})`);
+      fireGrad.addColorStop(1, 'rgba(120, 20, 10, 0)');
+      ctx.fillStyle = fireGrad;
+      ctx.beginPath();
+      ctx.arc(site.x, site.y, fireRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      const ringAlpha = Math.max(0, 0.45 * (1 - progress));
+      if (ringAlpha > 0) {
+        ctx.strokeStyle = site.accent;
+        ctx.globalAlpha = ringAlpha;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(site.x, site.y, 12 + progress * 88, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    });
+  }
+
   function handleInput(dt) {
     const steerInput = getSteerInput();
     const grip = weatherGripMult();
@@ -1795,6 +1950,17 @@
   function update(dt) {
     if (state === STATE.COUNTDOWN) {
       updateCountdown(dt);
+      return;
+    }
+    if (state === STATE.GAMEOVER) {
+      animFrame++;
+      updateParticles(dt);
+      updateFatalCrash(dt);
+      floatingTexts.forEach((ft) => {
+        ft.y += ft.vy;
+        ft.life -= dt * 0.9;
+      });
+      floatingTexts = floatingTexts.filter((ft) => ft.life > 0);
       return;
     }
     if (state !== STATE.PLAYING) return;
@@ -1931,12 +2097,7 @@
 
     spawnExhaustParticles();
 
-    particles.forEach((p) => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.life -= p.decay;
-    });
-    particles = particles.filter((p) => p.life > 0);
+    updateParticles(dt);
 
     const rainLevel = rainIntensity();
     rainDrops.forEach((drop) => {
@@ -2229,6 +2390,7 @@
   function drawObstacles() {
     const { isNight } = getDayNightLighting();
     obstacles.forEach((obs) => {
+      if (obs.exploded) return;
       if (obs.y + obs.height < -8) return;
 
       const enterFade = Math.min(1, (obs.y + obs.height) / 90);
@@ -2245,6 +2407,7 @@
   }
 
   function drawPlayer() {
+    if (fatalCrash) return;
     const img = images[activeCar.id];
     const glow = nitroActive ? '#ffffff' : activeCar.glow;
     const scale = nitroActive ? 1.05 : 1;
@@ -2830,8 +2993,9 @@
       drawRoad();
       drawPickups();
       drawObstacles();
-      drawPlayerHeadlights();
+      if (!fatalCrash) drawPlayerHeadlights();
       drawPlayer();
+      drawFatalCrashExplosions();
       drawParticles();
       drawRain();
       drawWeatherSnow();
