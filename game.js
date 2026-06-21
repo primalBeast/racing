@@ -61,6 +61,7 @@
 
   const ROAD_CAR_WIDTHS = 6;
   const REFERENCE_CAR_WIDTH = CAR_TYPES[0].width;
+  const ROAD_EDGE_MARGIN = 100;
   let ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
   const CURVE_AMPLITUDE_RATIO = 0.1;
   let CURVE_AMPLITUDE = W * CURVE_AMPLITUDE_RATIO;
@@ -720,16 +721,27 @@
 
   function roadBoundsAtScreenY(screenY) {
     const { center, nx } = roadNormalAtScreenY(screenY);
-    // Keep perpendicular width at ROAD_WIDTH; widen horizontal span on curves.
     const absNx = Math.max(0.32, Math.abs(nx));
-    const horizontalHalf = (ROAD_WIDTH / 2) / absNx;
-    const left = center - horizontalHalf;
-    const right = center + horizontalHalf;
+    const desiredHalf = (ROAD_WIDTH / 2) / absNx;
+    const maxHalf = (W - ROAD_EDGE_MARGIN * 2) / 2;
+    const horizontalHalf = Math.min(desiredHalf, maxHalf);
+
+    const minCenter = ROAD_EDGE_MARGIN + horizontalHalf;
+    const maxCenter = W - ROAD_EDGE_MARGIN - horizontalHalf;
+    let clampedCenter = center;
+    if (minCenter <= maxCenter) {
+      clampedCenter = Math.max(minCenter, Math.min(maxCenter, center));
+    } else {
+      clampedCenter = W / 2;
+    }
+
+    const left = clampedCenter - horizontalHalf;
+    const right = clampedCenter + horizontalHalf;
     return {
       left,
       right,
-      center,
-      width: horizontalHalf * 2,
+      center: clampedCenter,
+      width: right - left,
     };
   }
 
