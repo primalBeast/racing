@@ -62,11 +62,12 @@
   const ROAD_CAR_WIDTHS = 6;
   const REFERENCE_CAR_WIDTH = CAR_TYPES[0].width;
   let ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
-  let CURVE_AMPLITUDE = W * 0.18;
-  const STRAIGHT_SEGMENT_MIN = 480;
-  const STRAIGHT_SEGMENT_MAX = 950;
-  const CURVE_SEGMENT_MIN = 300;
-  const CURVE_SEGMENT_MAX = 520;
+  const CURVE_AMPLITUDE_RATIO = 0.1;
+  let CURVE_AMPLITUDE = W * CURVE_AMPLITUDE_RATIO;
+  const STRAIGHT_SEGMENT_MIN = 520;
+  const STRAIGHT_SEGMENT_MAX = 1050;
+  const CURVE_SEGMENT_MIN = 520;
+  const CURVE_SEGMENT_MAX = 920;
   const SPEED_TO_KMH = 15;
   const TRAFFIC_KMH_MIN = 60;
   const TRAFFIC_KMH_MAX = 120;
@@ -246,7 +247,7 @@
 
   function syncCanvasMetrics() {
     ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
-    CURVE_AMPLITUDE = W * 0.18;
+    CURVE_AMPLITUDE = W * CURVE_AMPLITUDE_RATIO;
   }
 
   function setLoadingProgress(loaded, total, label) {
@@ -493,15 +494,14 @@
 
   function pickCurveTarget(currentOffset) {
     const roll = Math.random();
-    if (roll < 0.55) {
-      return currentOffset > 0
-        ? -CURVE_AMPLITUDE * (0.8 + Math.random() * 0.2)
-        : CURVE_AMPLITUDE * (0.8 + Math.random() * 0.2);
+    if (roll < 0.45) {
+      const sign = currentOffset > 0 ? -1 : 1;
+      return sign * CURVE_AMPLITUDE * (0.35 + Math.random() * 0.2);
     }
-    if (roll < 0.8) {
-      return (Math.random() < 0.5 ? -1 : 1) * CURVE_AMPLITUDE * (0.55 + Math.random() * 0.35);
+    if (roll < 0.78) {
+      return (Math.random() < 0.5 ? -1 : 1) * CURVE_AMPLITUDE * (0.25 + Math.random() * 0.25);
     }
-    return 0;
+    return currentOffset * 0.4;
   }
 
   function appendRoadSegment(last, type) {
@@ -524,7 +524,7 @@
       let nextType;
       if (lastType === 'straight') {
         nextType = 'curve';
-      } else if (Math.random() < 0.45) {
+      } else if (Math.random() < 0.68) {
         nextType = 'straight';
       } else {
         nextType = 'curve';
