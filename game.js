@@ -701,12 +701,32 @@
     return obs.y + obs.height * 0.4 > player.y + player.height * 0.45;
   }
 
-  function roadBoundsAtScreenY(screenY) {
+  function roadNormalAtScreenY(screenY) {
+    const sample = Math.max(4, roadStep * 2);
+    const yAbove = Math.max(0, screenY - sample);
+    const yBelow = Math.min(H, screenY + sample);
     const center = roadCenterAtScreenY(screenY);
+    const centerAbove = roadCenterAtScreenY(yAbove);
+    const centerBelow = roadCenterAtScreenY(yBelow);
+    const tx = centerBelow - centerAbove;
+    const ty = yBelow - yAbove;
+    const len = Math.hypot(tx, ty) || 1;
     return {
-      left: center - ROAD_WIDTH / 2,
-      right: center + ROAD_WIDTH / 2,
       center,
+      nx: ty / len,
+      ny: -tx / len,
+    };
+  }
+
+  function roadBoundsAtScreenY(screenY) {
+    const { center, nx } = roadNormalAtScreenY(screenY);
+    const left = center - nx * (ROAD_WIDTH / 2);
+    const right = left + nx * ROAD_WIDTH;
+    return {
+      left,
+      right,
+      center,
+      width: right - left,
     };
   }
 
@@ -720,7 +740,7 @@
 
   function laneXFromFraction(screenY, fraction) {
     const bounds = roadBoundsAtScreenY(screenY);
-    return bounds.left + ROAD_WIDTH * fraction;
+    return bounds.left + bounds.width * fraction;
   }
 
   function buildRoadClipPath() {
@@ -2212,7 +2232,7 @@
       const bounds = roadBoundsAtScreenY(y);
       const pulse = 0.25 + Math.sin(wy * 0.08 + animFrame * 0.12) * 0.15;
       ctx.fillStyle = `rgba(80, 255, 160, ${pulse})`;
-      ctx.fillRect(bounds.left + 8, y, ROAD_WIDTH - 16, roadStep + 0.5);
+      ctx.fillRect(bounds.left + 8, y, bounds.width - 16, roadStep + 0.5);
     }
   }
 
@@ -2309,7 +2329,7 @@
       leftEdge.push({ x: bounds.left, y });
       rightEdge.push({ x: bounds.right, y });
       for (let i = 1; i < LANE_COUNT; i++) {
-        laneLines[i - 1].push({ x: bounds.left + (ROAD_WIDTH * i) / LANE_COUNT, y });
+        laneLines[i - 1].push({ x: bounds.left + (bounds.width * i) / LANE_COUNT, y });
       }
     }
     return { leftEdge, rightEdge, laneLines };
@@ -2345,13 +2365,13 @@
       const wet = Math.sin(wy * 0.031 + roadOffset * 0.06) * 4;
       const base = 19 + grain + wet * 0.25;
       ctx.fillStyle = `rgb(${base | 0}, ${(base + 2) | 0}, ${(base + 11) | 0})`;
-      ctx.fillRect(bounds.left, y, ROAD_WIDTH, roadStep + 0.5);
+      ctx.fillRect(bounds.left, y, bounds.width, roadStep + 0.5);
 
       const shimmer = (Math.sin(wy * 0.022 + roadOffset * 0.04) + 1) * 0.5;
       const wetBoost = weatherType === 'rain' ? 0.12 : 0;
       if (shimmer + wetBoost > 0.82) {
         ctx.fillStyle = `rgba(90, 170, 210, ${(shimmer + wetBoost - 0.82) * 0.42})`;
-        ctx.fillRect(bounds.left + ROAD_WIDTH * 0.08, y, ROAD_WIDTH * 0.84, roadStep + 0.5);
+        ctx.fillRect(bounds.left + bounds.width * 0.08, y, bounds.width * 0.84, roadStep + 0.5);
       }
     }
 
