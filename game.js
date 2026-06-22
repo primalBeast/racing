@@ -3620,10 +3620,7 @@
 
     const hudVisible = state === STATE.PLAYING || state === STATE.COUNTDOWN;
     setHudOverlayVisible(hudVisible);
-    if (hudVisible) {
-      drawHUD();
-      updateHtmlHud();
-    }
+    if (hudVisible) updateHtmlHud();
   }
 
   function gameLoop(timestamp) {

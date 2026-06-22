@@ -74,7 +74,7 @@
     }
 
     .hud-hp {
-      top: 1.2%;
+      top: 0.8%;
       left: 50%;
       transform: translateX(-50%);
       width: min(248px, 42%);
@@ -82,6 +82,7 @@
       padding: 8px 16px;
       border-color: rgba(127, 255, 159, 0.45);
       box-shadow: 0 0 16px rgba(127, 255, 159, 0.2);
+      z-index: 2;
     }
 
     .hud-hp.critical { border-color: rgba(255, 45, 149, 0.65); box-shadow: 0 0 16px rgba(255, 45, 149, 0.25); }
@@ -137,23 +138,25 @@
     }
 
     .hud-score-block {
-      top: 10.5%;
+      top: 9.5%;
       left: 1.25%;
-      width: min(220px, 38%);
-      min-width: 148px;
-      padding: 12px 14px 10px;
+      width: min(200px, 34%);
+      min-width: 136px;
+      padding: 10px 12px 8px;
       border-color: rgba(255, 225, 77, 0.85);
       box-shadow: 0 0 20px rgba(255, 225, 77, 0.35);
+      z-index: 1;
     }
 
     .hud-speed-block {
-      top: 10.5%;
+      top: 9.5%;
       right: 1.25%;
-      width: min(220px, 38%);
-      min-width: 148px;
-      padding: 12px 14px 10px;
+      width: min(200px, 34%);
+      min-width: 136px;
+      padding: 10px 12px 8px;
       border-color: rgba(255, 225, 77, 0.85);
       box-shadow: 0 0 20px rgba(255, 225, 77, 0.35);
+      z-index: 1;
     }
 
     .hud-stat-label {
@@ -211,13 +214,14 @@
     }
 
     .hud-nitro {
-      bottom: 3.5%;
+      bottom: 2%;
       left: 1.25%;
-      width: min(204px, 36%);
-      min-width: 140px;
-      padding: 10px 14px 8px;
+      width: min(190px, 32%);
+      min-width: 132px;
+      padding: 8px 12px 6px;
       border-color: rgba(0, 240, 255, 0.85);
       box-shadow: 0 0 20px rgba(0, 240, 255, 0.35);
+      z-index: 1;
     }
 
     .hud-nitro.active {
@@ -266,27 +270,33 @@
 
     .hud-env {
       position: absolute;
-      top: 1.2%;
+      top: 0.8%;
       right: 1.25%;
-      padding: 4px 12px;
-      font-size: 11px;
+      max-width: 42%;
+      padding: 4px 10px;
+      font-size: 10px;
       font-weight: 600;
       color: #ffe8a8;
-      background: rgba(10, 12, 22, 0.9);
+      background: rgba(10, 12, 22, 0.92);
       border: 1px solid rgba(255, 225, 120, 0.35);
       border-radius: 6px;
+      z-index: 2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .hud-env.night { color: #b8d8ff; border-color: rgba(120, 180, 255, 0.4); }
 
     .hud-combo {
       position: absolute;
-      top: 24%;
+      top: 22%;
       right: 1.25%;
-      padding: 8px 14px;
+      padding: 6px 12px;
       text-align: center;
       border-color: rgba(255, 110, 180, 0.65);
       box-shadow: 0 0 14px rgba(255, 45, 149, 0.25);
+      z-index: 1;
     }
 
     .hud-combo-main {
@@ -305,16 +315,18 @@
 
     .hud-nitro-boost {
       position: absolute;
-      top: 9%;
+      top: 17.5%;
       left: 50%;
       transform: translateX(-50%);
       font-family: 'Orbitron', sans-serif;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.08em;
       color: #fff;
       text-shadow: 0 0 14px #ff2d95, 0 0 8px #00f0ff;
       white-space: nowrap;
+      z-index: 1;
+      pointer-events: none;
     }
 
     .edge-debug-marker {
@@ -906,6 +918,6 @@
 
   <script src="cars.js?v=15"></script>
   <script src="themes.js?v=15"></script>
-  <script src="game.js?v=61"></script>
+  <script src="game.js?v=62"></script>
 </body>
 </html>
