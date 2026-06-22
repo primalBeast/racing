@@ -102,6 +102,11 @@
   const KNOCKOUT_LAUNCH_VY = 18;
   const TRAFFIC_SPAWN_ABOVE_MIN = 32;
   const TRAFFIC_SPAWN_ABOVE_MAX = 160;
+  const TRAFFIC_ON_SCREEN_MIN = 4;
+  const TRAFFIC_ON_SCREEN_MAX = 16;
+  const TRAFFIC_CAP_RAMP_DISTANCE = 12000;
+  const TRAFFIC_BOUNCE_PASSES = 6;
+  const TRAFFIC_CONTACT_LINGER = 0.45;
   const PLAYER_HIT_INVULN = 1.1;
   const BOUNCE_STRENGTH = 3.2;
   const BOUNCE_DAMPING = 0.86;
@@ -761,6 +766,25 @@
     return obs.y + obs.height * 0.4 > player.y + player.height * 0.45;
   }
 
+  function getTrafficCap() {
+    const progress = Math.min(1, distance / TRAFFIC_CAP_RAMP_DISTANCE);
+    return Math.round(
+      TRAFFIC_ON_SCREEN_MIN + progress * (TRAFFIC_ON_SCREEN_MAX - TRAFFIC_ON_SCREEN_MIN)
+    );
+  }
+
+  function activeTrafficCount() {
+    return obstacles.filter((obs) => !obs.knockedOut).length;
+  }
+
+  function trafficOverlapsOther(obs, skipIndex) {
+    for (let i = 0; i < obstacles.length; i++) {
+      if (i === skipIndex || obstacles[i].knockedOut) continue;
+      if (carsOverlap(obs, obstacles[i])) return true;
+    }
+    return false;
+  }
+
   function roadNormalAtScreenY(screenY) {
     const sample = Math.max(4, roadStep * 2);
     const yAbove = Math.max(0, screenY - sample);
@@ -998,8 +1022,6 @@
   function startGame() {
     state = STATE.COUNTDOWN;
     countdownTimer = COUNTDOWN_DURATION;
-    setHudOverlayVisible(true);
-    updateHtmlHud();
     document.getElementById('title-screen').classList.add('hidden');
     document.getElementById('game-over-screen').classList.add('hidden');
 
@@ -1795,6 +1817,57 @@
     return { midX, midY };
   }
 
+  function bounceTrafficPair(a, b, depth, currentSpeed) {
+    const midX = (a.x + b.x) * 0.5;
+    const midY = (a.y + b.y + a.height * 0.3 + b.height * 0.3) * 0.25;
+    const lateralDir = a.x < b.x ? -1 : 1;
+    const verticalDir = a.y < b.y ? -1 : 1;
+
+    if (depth.x <= depth.y) {
+      const push = depth.x * 0.82;
+      a.x -= push * lateralDir;
+      b.x += push * lateralDir;
+      const impulse = BOUNCE_STRENGTH * 2.4;
+      a.vx = (a.vx || 0) - impulse * lateralDir;
+      b.vx = (b.vx || 0) + impulse * lateralDir;
+      a.laneFraction = Math.max(0.04, Math.min(0.96, a.laneFraction - lateralDir * 0.06));
+      b.laneFraction = Math.max(0.04, Math.min(0.96, b.laneFraction + lateralDir * 0.06));
+    } else {
+      const push = depth.y * 0.78;
+      a.y -= push * verticalDir;
+      b.y += push * verticalDir;
+      const impulse = BOUNCE_STRENGTH * 1.8;
+      a.vy = (a.vy || 0) - impulse * verticalDir;
+      b.vy = (b.vy || 0) + impulse * verticalDir;
+
+      const trafficCap = maxTrafficSpeed(currentSpeed);
+      const exchange = 0.28;
+      if (verticalDir < 0) {
+        a.speed = Math.min(a.speed + exchange, trafficCap);
+        b.speed = Math.max(b.speed - exchange * 0.7, kmhToSpeed(TRAFFIC_KMH_MIN * 0.5));
+      } else {
+        b.speed = Math.min(b.speed + exchange, trafficCap);
+        a.speed = Math.max(a.speed - exchange * 0.7, kmhToSpeed(TRAFFIC_KMH_MIN * 0.5));
+      }
+      clampTrafficSpeed(a, currentSpeed);
+      clampTrafficSpeed(b, currentSpeed);
+    }
+
+    const spinDir = lateralDir;
+    if ((a.spinOutTimer || 0) <= 0.05) {
+      a.spinOutTimer = 0.55 + Math.random() * 0.25;
+      a.spinOutRate = spinDir * (5 + Math.random() * 4);
+    }
+    if ((b.spinOutTimer || 0) <= 0.05) {
+      b.spinOutTimer = 0.55 + Math.random() * 0.25;
+      b.spinOutRate = -spinDir * (5 + Math.random() * 4);
+    }
+
+    a.trafficContactTimer = TRAFFIC_CONTACT_LINGER;
+    b.trafficContactTimer = TRAFFIC_CONTACT_LINGER;
+    return { midX, midY };
+  }
+
   function triggerTrafficSpinOut(obs, pushDir, currentSpeed) {
     obs.spinOutTimer = SPINOUT_DURATION + Math.random() * 0.45;
     obs.spinOutRate = pushDir * (SPINOUT_RATE + Math.random() * 4);
@@ -1958,7 +2031,7 @@
   }
 
   function resolveTrafficCollisions(currentSpeed) {
-    for (let pass = 0; pass < 2; pass++) {
+    for (let pass = 0; pass < TRAFFIC_BOUNCE_PASSES; pass++) {
       for (let i = 0; i < obstacles.length; i++) {
         for (let j = i + 1; j < obstacles.length; j++) {
           const a = obstacles[i];
@@ -1969,23 +2042,24 @@
           const depth = overlapDepth(a, b);
           if (depth.x <= 0 || depth.y <= 0) continue;
 
-          const { midX, midY } = bounceCars(a, b, depth, currentSpeed);
+          const { midX, midY } = bounceTrafficPair(a, b, depth, currentSpeed);
 
           const now = performance.now() / 1000;
           if (!a.hitCooldown || now > a.hitCooldown) {
             a.hitCooldown = now + TRAFFIC_COLLISION_COOLDOWN;
             b.hitCooldown = now + TRAFFIC_COLLISION_COOLDOWN;
             spawnCollisionParticles(midX, midY);
+            if (perfProfile.spinoutSparks) spawnSpinoutSparks(midX, midY);
           }
         }
       }
     }
 
     obstacles.forEach((obs) => {
-      if (obs.knockedOut || obs.spinOutTimer > 0) return;
+      if (obs.knockedOut || obs.spinOutTimer > 0 || (obs.trafficContactTimer || 0) > 0) return;
       const centerY = obs.y + obs.height * 0.52;
       const laneX = laneXFromFraction(centerY, obs.laneFraction);
-      const maxDrift = obs.width * 0.22;
+      const maxDrift = obs.width * 0.18;
       obs.x = Math.max(laneX - maxDrift, Math.min(laneX + maxDrift, obs.x));
     });
   }
@@ -2020,6 +2094,7 @@
       hitCooldown: 0,
       spinOutTimer: 0,
       spinOutRate: 0,
+      trafficContactTimer: 0,
     });
   }
 
@@ -2289,9 +2364,20 @@
     difficulty = 1 + distance / DIFFICULTY_RAMP_DISTANCE;
 
     spawnTimer -= dt;
-    if (spawnTimer <= 0 && speedToKmh(currentSpeed) >= LAUNCH_SPEED_KMH * 0.7) {
+    const trafficCap = getTrafficCap();
+    const trafficActive = activeTrafficCount();
+    if (
+      spawnTimer <= 0
+      && speedToKmh(currentSpeed) >= LAUNCH_SPEED_KMH * 0.7
+      && trafficActive < trafficCap
+    ) {
       spawnObstacle(currentSpeed);
-      spawnTimer = Math.max(0.6, 2.2 - difficulty * 0.3) * (0.7 + Math.random() * 0.6);
+      const fillPressure = 1 - trafficActive / Math.max(1, trafficCap);
+      spawnTimer = Math.max(
+        0.28,
+        (Math.max(0.45, 1.8 - difficulty * 0.28) * (0.55 + Math.random() * 0.45))
+          * (1.05 - fillPressure * 0.62)
+      );
     }
 
     pickupSpawnTimer -= dt;
@@ -2314,7 +2400,8 @@
     });
     pickups = pickups.filter((pickup) => !pickup.collected && pickup.y < H + 40);
 
-    obstacles.forEach((obs) => {
+    obstacles.forEach((obs, obsIndex) => {
+      if (obs.trafficContactTimer > 0) obs.trafficContactTimer -= dt;
       if (!obs.knockedOut) clampTrafficSpeed(obs, currentSpeed);
       obs.prevX = obs.x;
       obs.x += (obs.vx || 0) * dt * 60;
@@ -2330,7 +2417,11 @@
 
       const centerY = obs.y + obs.height * 0.52;
       const spinning = obs.spinOutTimer > 0;
-      if (!obs.knockedOut) {
+      if (
+        !obs.knockedOut
+        && (obs.trafficContactTimer || 0) <= 0
+        && !trafficOverlapsOther(obs, obsIndex)
+      ) {
         const targetX = laneXFromFraction(centerY, obs.laneFraction);
         const laneBlend = Math.min(1, TRAFFIC_LANE_SMOOTH * dt * (spinning ? 0.12 : 1));
         obs.x += (targetX - obs.x) * laneBlend;
@@ -3128,9 +3219,9 @@
     ctx.shadowColor = accent;
     ctx.shadowBlur = 16;
     const shell = ctx.createLinearGradient(x, y, x + w, y + h);
-    shell.addColorStop(0, 'rgba(14, 16, 28, 0.94)');
-    shell.addColorStop(0.45, 'rgba(10, 12, 22, 0.9)');
-    shell.addColorStop(1, 'rgba(6, 8, 16, 0.96)');
+    shell.addColorStop(0, 'rgba(14, 16, 28, 0.98)');
+    shell.addColorStop(0.45, 'rgba(10, 12, 22, 0.97)');
+    shell.addColorStop(1, 'rgba(6, 8, 16, 0.99)');
     ctx.fillStyle = shell;
     roundRect(ctx, x, y, w, h, radius);
     ctx.fill();
@@ -3322,6 +3413,67 @@
     }
   }
 
+  function drawHUD() {
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.setLineDash([]);
+    ctx.textBaseline = 'alphabetic';
+    ctx.shadowBlur = 0;
+
+    const tints = getHudTints();
+    const lighting = getDayNightLighting();
+    if (lighting.isNight) ctx.globalAlpha = Math.max(0.95, tints.panelAlpha);
+
+    drawHitPointsHud();
+
+    const panelW = 220;
+    const panelY = 76;
+    const kmh = Math.round(hudSpeedKmh);
+    const speedAccent = tints.speed;
+    const scorePanelAccent = lighting.isNight ? 'rgba(120, 190, 255, 0.9)' : 'rgba(255, 225, 77, 0.95)';
+
+    drawHudPanel(16, panelY, panelW, 88, scorePanelAccent);
+    drawHudStat(30, panelY + 18, 'SCORE', Math.floor(score).toLocaleString(), '', tints.score, 28, panelW);
+    drawHudStat(30, panelY + 54, 'DISTANCE', `${Math.floor(distance)}`, 'm', tints.distance, 20, panelW);
+
+    const speedPanelX = W - panelW - 16;
+    drawHudPanel(speedPanelX, panelY, panelW, 88, speedAccent);
+    drawHudStat(speedPanelX + 14, panelY + 18, 'VELOCITY', `${kmh}`, 'km/h', speedAccent, 36, panelW);
+
+    ctx.textAlign = 'right';
+    ctx.font = '600 11px Rajdhani, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.fillText(activeCar.name.toUpperCase(), speedPanelX + panelW - 14, panelY + 78);
+
+    const nitroW = 204;
+    const nitroX = 16;
+    const nitroY = H - 50;
+    drawHudPanel(
+      nitroX,
+      nitroY - 16,
+      nitroW,
+      38,
+      nitroActive ? 'rgba(255, 110, 180, 0.95)' : 'rgba(0, 240, 255, 0.75)',
+      { compact: true }
+    );
+    drawNitroBar(nitroX, nitroY, nitroW);
+
+    if (nitroActive) {
+      ctx.textAlign = 'center';
+      ctx.font = '700 13px Orbitron, sans-serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#ff2d95';
+      ctx.shadowBlur = 14;
+      ctx.fillText('◆ NITRO BOOST ◆', W / 2, 72);
+      ctx.shadowBlur = 0;
+    }
+
+    drawEnvironmentBadge();
+    drawComboBadge();
+    ctx.restore();
+  }
+
   function drawCountdown() {
     const remaining = Math.max(1, Math.ceil(countdownTimer));
     const label = String(remaining);
@@ -3451,11 +3603,14 @@
     setEdgeMarginDebugVisible(showEdgeDebug);
     if (showEdgeDebug) drawEdgeMarginDebugMarkers();
 
-    const hudVisible = state === STATE.PLAYING || state === STATE.COUNTDOWN;
-    setHudOverlayVisible(hudVisible);
-    if (hudVisible) updateHtmlHud();
-
     ctx.restore();
+
+    const hudVisible = state === STATE.PLAYING || state === STATE.COUNTDOWN;
+    if (hudVisible) {
+      drawHUD();
+      updateHtmlHud();
+    }
+    setHudOverlayVisible(false);
   }
 
   function gameLoop(timestamp) {
