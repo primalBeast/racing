@@ -79,7 +79,8 @@
   const MAX_SIM_SUBSTEPS = 20;
   let roadStep = 2;
   let simAccumulator = 0;
-  const STATE = { LOADING: 0, TITLE: 1, COUNTDOWN: 2, PLAYING: 3, GAMEOVER: 4 };
+  const STATE = { LOADING: 0, TITLE: 1, COUNTDOWN: 2, PLAYING: 3, GAMEOVER: 4, PAUSED: 5 };
+  const RAMMER_TRAFFIC_INTERVAL = 50;
   const COUNTDOWN_DURATION = 3;
   const TRAFFIC_MAX_SPEED_RATIO = 0.84;
   const STEER_BASE = 12;
@@ -168,6 +169,7 @@
   let knockoutTimer = 0;
   let themeBannerTimer = 0;
   let pickupSpawnTimer = 2.5;
+  let trafficCarsSinceRammer = 0;
   let driftSparkTimer = 0;
   let showLegend = true;
   let roadOffset = 0;
@@ -1077,6 +1079,7 @@
     knockoutTimer = 0;
     themeBannerTimer = 3.2;
     pickupSpawnTimer = 0.8;
+    trafficCarsSinceRammer = 0;
     driftSparkTimer = 0;
     showLegend = perfProfile.showLegendDefault;
     lastTime = performance.now();
@@ -1636,8 +1639,11 @@
   }
 
   function pickPickupType() {
+    if (trafficCarsSinceRammer >= RAMMER_TRAFFIC_INTERVAL) {
+      trafficCarsSinceRammer = 0;
+      return 'rammer';
+    }
     const roll = Math.random();
-    if (roll < 0.20) return 'rammer';
     if (hitPoints < MAX_HIT_POINTS && roll < 0.38) return 'repair';
     if (nitro < 35) {
       if (roll < 0.72) return 'nitro';
@@ -2108,6 +2114,7 @@
       spinOutRate: 0,
       trafficContactTimer: 0,
     });
+    trafficCarsSinceRammer += 1;
   }
 
   function spawnExhaustParticles() {
@@ -2310,7 +2317,22 @@
     }
   }
 
+  function togglePause() {
+    if (state === STATE.PLAYING) {
+      state = STATE.PAUSED;
+      stopEngineSound();
+      return;
+    }
+    if (state === STATE.PAUSED) {
+      state = STATE.PLAYING;
+      lastTime = performance.now();
+      simAccumulator = 0;
+      playEngineSound(activeCar);
+    }
+  }
+
   function update(dt) {
+    if (state === STATE.PAUSED) return;
     if (state === STATE.COUNTDOWN) {
       updateCountdown(dt);
       return;
@@ -3487,6 +3509,27 @@
     ctx.restore();
   }
 
+  function drawPauseOverlay() {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = 'rgba(4, 6, 18, 0.62)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 56px Orbitron, sans-serif';
+    ctx.fillStyle = '#00f0ff';
+    ctx.shadowColor = '#00f0ff';
+    ctx.shadowBlur = 18;
+    ctx.fillText('PAUSED', W / 2, H / 2 - 18);
+    ctx.shadowBlur = 0;
+
+    ctx.font = '600 17px Rajdhani, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.78)';
+    ctx.fillText('Press ESC to resume', W / 2, H / 2 + 36);
+    ctx.restore();
+  }
+
   function drawCountdown() {
     const remaining = Math.max(1, Math.ceil(countdownTimer));
     const label = String(remaining);
@@ -3587,7 +3630,7 @@
 
     ctx.clearRect(0, 0, W, H);
 
-    if (state === STATE.PLAYING || state === STATE.GAMEOVER || state === STATE.COUNTDOWN) {
+    if (state === STATE.PLAYING || state === STATE.PAUSED || state === STATE.GAMEOVER || state === STATE.COUNTDOWN) {
       drawBackground();
       drawRoad();
       drawPickups();
@@ -3604,13 +3647,17 @@
       if (state === STATE.COUNTDOWN) {
         drawCountdown();
       }
-      if (state === STATE.PLAYING) {
+      if (state === STATE.PLAYING || state === STATE.PAUSED) {
         drawThemeBanner();
         if (showLegend) drawLegend();
+      }
+      if (state === STATE.PAUSED) {
+        drawPauseOverlay();
       }
     }
 
     const showEdgeDebug = state === STATE.PLAYING
+      || state === STATE.PAUSED
       || state === STATE.COUNTDOWN
       || state === STATE.GAMEOVER;
     setEdgeMarginDebugVisible(showEdgeDebug);
@@ -3618,7 +3665,7 @@
 
     ctx.restore();
 
-    const hudVisible = state === STATE.PLAYING || state === STATE.COUNTDOWN;
+    const hudVisible = state === STATE.PLAYING || state === STATE.PAUSED || state === STATE.COUNTDOWN;
     setHudOverlayVisible(hudVisible);
     if (hudVisible) updateHtmlHud();
   }
@@ -3629,19 +3676,21 @@
     lastTime = timestamp;
     if (frameDt > MAX_FRAME_DT) frameDt = MAX_FRAME_DT;
 
-    simAccumulator += frameDt;
-    let steps = 0;
-    while (simAccumulator >= FIXED_DT && steps < MAX_SIM_SUBSTEPS) {
-      update(FIXED_DT);
-      simAccumulator -= FIXED_DT;
-      steps += 1;
-    }
-    if (steps === MAX_SIM_SUBSTEPS && simAccumulator >= FIXED_DT) {
-      simAccumulator = 0;
-    }
+    if (state !== STATE.PAUSED) {
+      simAccumulator += frameDt;
+      let steps = 0;
+      while (simAccumulator >= FIXED_DT && steps < MAX_SIM_SUBSTEPS) {
+        update(FIXED_DT);
+        simAccumulator -= FIXED_DT;
+        steps += 1;
+      }
+      if (steps === MAX_SIM_SUBSTEPS && simAccumulator >= FIXED_DT) {
+        simAccumulator = 0;
+      }
 
-    if (shakeTimer > 0) {
-      shakeTimer = Math.max(0, shakeTimer - frameDt * 60);
+      if (shakeTimer > 0) {
+        shakeTimer = Math.max(0, shakeTimer - frameDt * 60);
+      }
     }
 
     render();
@@ -3690,6 +3739,16 @@
       clearStartKeys();
       return;
     }
+
+    if (e.key === 'Escape') {
+      if (state === STATE.PLAYING || state === STATE.PAUSED) {
+        e.preventDefault();
+        togglePause();
+        return;
+      }
+    }
+
+    if (state === STATE.PAUSED) return;
 
     if (state === STATE.PLAYING && (e.key === 'l' || e.key === 'L')) {
       showLegend = !showLegend;
