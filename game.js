@@ -3914,16 +3914,9 @@
     const container = document.getElementById('game-container');
     if (!container) return;
 
-    const cW = container.clientWidth;
     const cH = container.clientHeight;
-    let baseW = cW;
-    let baseH = Math.round(cW / REF_ASPECT);
-    if (baseH > cH) {
-      baseH = cH;
-      baseW = Math.round(cH * REF_ASPECT);
-    }
-    BASE_W = Math.max(320, baseW);
-    BASE_H = Math.max(180, baseH);
+    BASE_H = Math.max(360, cH);
+    BASE_W = Math.max(640, Math.round(BASE_H * REF_ASPECT));
 
     W = Math.max(640, Math.round(BASE_W * perfProfile.renderScale));
     H = Math.max(360, Math.round(BASE_H * perfProfile.renderScale));
