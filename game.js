@@ -2775,25 +2775,26 @@
   function drawThemeBanner() {
     if (!activeTheme || themeBannerTimer <= 0) return;
     const alpha = Math.min(1, themeBannerTimer);
+    const layout = getHudLayout();
+    const panelW = Math.min(420, layout.vis.width * 0.55);
+    const panelH = 84;
+    const x = layout.vis.centerX - panelW / 2;
+    const y = layout.topRowY + layout.statPanelH + 14;
     ctx.save();
     ctx.globalAlpha = alpha;
-    const panelW = 420;
-    const panelH = 84;
-    const x = (W - panelW) / 2;
-    const y = 110;
     drawHudPanel(x, y, panelW, panelH, 'rgba(0, 240, 255, 0.5)');
     ctx.textAlign = 'center';
     ctx.font = '700 22px Orbitron, sans-serif';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(activeTheme.name, W / 2, y + 30);
+    ctx.fillText(activeTheme.name, layout.vis.centerX, y + 30);
     ctx.font = '600 13px Rajdhani, sans-serif';
     ctx.fillStyle = '#8be9ff';
-    ctx.fillText(activeTheme.subtitle, W / 2, y + 48);
+    ctx.fillText(activeTheme.subtitle, layout.vis.centerX, y + 48);
     const lighting = getDayNightLighting();
     const weatherLabel = WEATHER_LABELS[weatherType] || 'Clear';
     ctx.font = '600 12px Rajdhani, sans-serif';
     ctx.fillStyle = weatherType === 'rain' ? '#9fd4ff' : weatherType === 'snow' ? '#e8f4ff' : weatherType === 'fog' ? '#c8d0e0' : '#b8c8e8';
-    ctx.fillText(`${weatherLabel} · ${lighting.label}`, W / 2, y + 64);
+    ctx.fillText(`${weatherLabel} · ${lighting.label}`, layout.vis.centerX, y + 64);
     ctx.restore();
   }
 
