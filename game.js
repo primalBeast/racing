@@ -61,7 +61,7 @@
 
   const ROAD_CAR_WIDTHS = 6;
   const REFERENCE_CAR_WIDTH = CAR_TYPES[0].width;
-  const ROAD_EDGE_MARGIN = 100;
+  const ROAD_EDGE_MARGIN_RATIO = 0.05;
   let ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
   let CURVE_AMPLITUDE = 0;
   const CURVE_NORMAL_MIN = 0.42;
@@ -802,20 +802,28 @@
     };
   }
 
+  function getRoadEdgeMarginCssPx() {
+    const container = document.getElementById('game-container');
+    const width = container?.clientWidth || window.innerWidth || BASE_W;
+    return width * ROAD_EDGE_MARGIN_RATIO;
+  }
+
   function getViewportEdgeMarginsInternal() {
+    const fallback = W * ROAD_EDGE_MARGIN_RATIO;
     const container = document.getElementById('game-container');
     if (!container || !canvas) {
-      return { left: ROAD_EDGE_MARGIN, right: ROAD_EDGE_MARGIN };
+      return { left: fallback, right: fallback };
     }
 
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0) {
-      return { left: ROAD_EDGE_MARGIN, right: ROAD_EDGE_MARGIN };
+      return { left: fallback, right: fallback };
     }
 
     const containerRect = container.getBoundingClientRect();
-    const leftInternal = ((containerRect.left + ROAD_EDGE_MARGIN - rect.left) / rect.width) * W;
-    const rightInternal = ((containerRect.right - ROAD_EDGE_MARGIN - rect.left) / rect.width) * W;
+    const marginCss = getRoadEdgeMarginCssPx();
+    const leftInternal = ((containerRect.left + marginCss - rect.left) / rect.width) * W;
+    const rightInternal = ((containerRect.right - marginCss - rect.left) / rect.width) * W;
     return {
       left: Math.max(0, leftInternal),
       right: Math.max(0, W - rightInternal),
@@ -3555,7 +3563,7 @@
       ctx.font = '700 16px Orbitron, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('100px', x, centerY);
+      ctx.fillText('5%', x, centerY);
     });
     ctx.globalAlpha = 1;
     ctx.restore();
