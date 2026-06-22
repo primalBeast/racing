@@ -3255,12 +3255,16 @@
     const vis = getVisibleHudBounds();
     const marginX = Math.max(10, vis.width * 0.0125);
     const marginY = Math.max(8, H * 0.012);
-    const panelW = Math.min(220, vis.width * 0.19);
+    const panelW = Math.min(
+      220,
+      vis.width * 0.19,
+      Math.max(108, (vis.width - marginX * 3) / 2)
+    );
     const statPanelH = Math.max(72, H * 0.12);
     const topRowY = Math.max(64, H * 0.095);
-    const hpPanelW = Math.min(248, W * 0.34);
+    const hpPanelW = Math.min(248, vis.width * 0.34);
     const hpPanelH = Math.max(48, H * 0.075);
-    const nitroW = Math.min(204, W * 0.18);
+    const nitroW = Math.min(204, vis.width * 0.18);
     const nitroPanelH = Math.max(34, H * 0.052);
     return {
       vis,
@@ -3930,16 +3934,9 @@
     const container = document.getElementById('game-container');
     if (!container) return;
 
-    const cW = container.clientWidth;
     const cH = container.clientHeight;
-    let baseW = cW;
-    let baseH = Math.round(cW / REF_ASPECT);
-    if (baseH > cH) {
-      baseH = cH;
-      baseW = Math.round(cH * REF_ASPECT);
-    }
-    BASE_W = Math.max(320, baseW);
-    BASE_H = Math.max(180, baseH);
+    BASE_H = Math.max(360, cH);
+    BASE_W = Math.max(640, Math.round(BASE_H * REF_ASPECT));
 
     W = Math.max(640, Math.round(BASE_W * perfProfile.renderScale));
     H = Math.max(360, Math.round(BASE_H * perfProfile.renderScale));
