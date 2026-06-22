@@ -3238,10 +3238,24 @@
     ctx.stroke();
   }
 
+  function getVisibleHudBounds() {
+    const container = document.getElementById('game-container');
+    const cW = container?.clientWidth || BASE_W;
+    const visibleRatio = Math.min(1, cW / Math.max(1, BASE_W));
+    const insetX = (W * (1 - visibleRatio)) / 2;
+    return {
+      left: insetX,
+      right: W - insetX,
+      width: Math.max(W * 0.5, W * visibleRatio),
+      centerX: W / 2,
+    };
+  }
+
   function getHudLayout() {
-    const marginX = Math.max(10, W * 0.0125);
+    const vis = getVisibleHudBounds();
+    const marginX = Math.max(10, vis.width * 0.0125);
     const marginY = Math.max(8, H * 0.012);
-    const panelW = Math.min(220, W * 0.19);
+    const panelW = Math.min(220, vis.width * 0.19);
     const statPanelH = Math.max(72, H * 0.12);
     const topRowY = Math.max(64, H * 0.095);
     const hpPanelW = Math.min(248, W * 0.34);
@@ -3249,6 +3263,7 @@
     const nitroW = Math.min(204, W * 0.18);
     const nitroPanelH = Math.max(34, H * 0.052);
     return {
+      vis,
       marginX,
       marginY,
       panelW,
@@ -3268,7 +3283,7 @@
   function drawHitPointsHud(layout = getHudLayout()) {
     const panelW = layout.hpPanelW;
     const panelH = layout.hpPanelH;
-    const x = W / 2 - panelW / 2;
+    const x = layout.vis.centerX - panelW / 2;
     const y = layout.marginY;
     const accent = hitPoints <= 1 ? '#ff2d95' : '#7fff9f';
     const pad = Math.max(12, panelW * 0.07);
@@ -3492,7 +3507,7 @@
     const label = `${WEATHER_LABELS[weatherType]} · ${lighting.label}`;
     const badgeW = Math.min(168, W * 0.22);
     const badgeH = 22;
-    const x = W - badgeW - layout.marginX;
+    const x = layout.vis.right - badgeW - layout.marginX;
     const y = layout.marginY;
     ctx.save();
     ctx.globalAlpha = lighting.isNight ? 0.82 : 0.9;
@@ -3533,7 +3548,7 @@
 
     const badgeW = Math.min(148, W * 0.2);
     const badgeH = 38;
-    const x = W - badgeW - layout.marginX;
+    const x = layout.vis.right - badgeW - layout.marginX;
     const y = layout.topRowY + layout.statPanelH + 8;
     drawHudPanel(x, y, badgeW, badgeH, '#ff6eb4', { compact: true });
 
@@ -3572,15 +3587,16 @@
 
     drawHitPointsHud(layout);
 
-    const { panelW, statPanelH, topRowY, marginX, nitroW, nitroY, nitroPanelH } = layout;
+    const { panelW, statPanelH, topRowY, marginX, nitroW, nitroY, nitroPanelH, vis } = layout;
     const kmh = Math.round(hudSpeedKmh);
     const speedAccent = tints.speed;
     const scorePanelAccent = lighting.isNight ? 'rgba(120, 190, 255, 0.9)' : 'rgba(255, 225, 77, 0.95)';
     const statPad = Math.max(12, panelW * 0.07);
+    const scorePanelX = vis.left + marginX;
 
-    drawHudPanel(marginX, topRowY, panelW, statPanelH, scorePanelAccent);
+    drawHudPanel(scorePanelX, topRowY, panelW, statPanelH, scorePanelAccent);
     drawHudStat(
-      marginX + statPad,
+      scorePanelX + statPad,
       topRowY + 18,
       'SCORE',
       Math.floor(score).toLocaleString(),
@@ -3590,7 +3606,7 @@
       panelW
     );
     drawHudStat(
-      marginX + statPad,
+      scorePanelX + statPad,
       topRowY + 18 + layout.scoreValueSize + 14,
       'DISTANCE',
       `${Math.floor(distance)}`,
@@ -3600,7 +3616,7 @@
       panelW
     );
 
-    const speedPanelX = W - panelW - marginX;
+    const speedPanelX = vis.right - panelW - marginX;
     drawHudPanel(speedPanelX, topRowY, panelW, statPanelH, speedAccent);
     drawHudStat(
       speedPanelX + statPad,
@@ -3619,14 +3635,14 @@
     ctx.fillText(activeCar.name.toUpperCase(), speedPanelX + panelW - statPad, topRowY + statPanelH - 10);
 
     drawHudPanel(
-      marginX,
+      scorePanelX,
       nitroY - nitroPanelH + 6,
       nitroW,
       nitroPanelH,
       nitroActive ? 'rgba(255, 110, 180, 0.95)' : 'rgba(0, 240, 255, 0.75)',
       { compact: true }
     );
-    drawNitroBar(marginX, nitroY, nitroW);
+    drawNitroBar(scorePanelX, nitroY, nitroW);
 
     if (nitroActive) {
       ctx.textAlign = 'center';
@@ -3634,7 +3650,7 @@
       ctx.fillStyle = '#ffffff';
       ctx.shadowColor = '#ff2d95';
       ctx.shadowBlur = 14;
-      ctx.fillText('◆ NITRO BOOST ◆', W / 2, topRowY - 8);
+      ctx.fillText('◆ NITRO BOOST ◆', vis.centerX, topRowY - 8);
       ctx.shadowBlur = 0;
     }
 
@@ -3914,9 +3930,16 @@
     const container = document.getElementById('game-container');
     if (!container) return;
 
+    const cW = container.clientWidth;
     const cH = container.clientHeight;
-    BASE_H = Math.max(360, cH);
-    BASE_W = Math.max(640, Math.round(BASE_H * REF_ASPECT));
+    let baseW = cW;
+    let baseH = Math.round(cW / REF_ASPECT);
+    if (baseH > cH) {
+      baseH = cH;
+      baseW = Math.round(cH * REF_ASPECT);
+    }
+    BASE_W = Math.max(320, baseW);
+    BASE_H = Math.max(180, baseH);
 
     W = Math.max(640, Math.round(BASE_W * perfProfile.renderScale));
     H = Math.max(360, Math.round(BASE_H * perfProfile.renderScale));
