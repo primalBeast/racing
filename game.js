@@ -3605,9 +3605,9 @@
       }
     }
 
-    const showEdgeDebug = state !== STATE.PLAYING
-      && state !== STATE.COUNTDOWN
-      && state !== STATE.LOADING;
+    const showEdgeDebug = state === STATE.PLAYING
+      || state === STATE.COUNTDOWN
+      || state === STATE.GAMEOVER;
     setEdgeMarginDebugVisible(showEdgeDebug);
     if (showEdgeDebug) drawEdgeMarginDebugMarkers();
 
