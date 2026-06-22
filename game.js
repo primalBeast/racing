@@ -83,6 +83,9 @@
   const RAMMER_TRAFFIC_INTERVAL = 50;
   const REPAIR_TRAFFIC_INTERVAL = 35;
   const NITRO_TRAFFIC_INTERVAL = 20;
+  const BOOST_TRAFFIC_INTERVAL = 35;
+  const OFF_ROAD_EXPLODE_DELAY = 2;
+  const OFF_ROAD_FALL_GRAVITY = 1.85;
   const WALL_SOUND_VOLUME = 0.75;
   const COUNTDOWN_DURATION = 3;
   const TRAFFIC_MAX_SPEED_RATIO = 0.84;
@@ -175,6 +178,7 @@
   let trafficCarsSinceRammer = 0;
   let trafficCarsSinceRepair = 0;
   let trafficCarsSinceNitro = 0;
+  let trafficCarsSinceBoost = 0;
   let driftSparkTimer = 0;
   let showLegend = true;
   let roadOffset = 0;
@@ -769,6 +773,34 @@
     return x - halfW >= bounds.left + 6 && x + halfW <= bounds.right - 6;
   }
 
+  function isTrafficOffRoad(obs) {
+    const centerY = obs.y + obs.height * 0.52;
+    const bounds = roadBoundsAtScreenY(centerY);
+    const halfW = obs.width * 0.45;
+    return obs.x - halfW < bounds.left || obs.x + halfW > bounds.right;
+  }
+
+  function shouldTriggerOffRoadFall(obs) {
+    if (obs.offRoadFall || obs.exploded) return false;
+    if (!isTrafficOffRoad(obs)) return false;
+    return (
+      obs.knockedOut
+      || obs.spinOutTimer > 0
+      || (obs.trafficContactTimer || 0) > 0
+      || Math.abs(obs.vx || 0) > 3
+    );
+  }
+
+  function explodeOffRoadTraffic(obs) {
+    if (obs.exploded) return;
+    obs.exploded = true;
+    const cx = obs.x;
+    const cy = obs.y + obs.height * 0.45;
+    spawnCarExplosion(cx, cy, obs.width, obs.height, obs.carType.glow || '#ff8c3a');
+    playExplosionSound();
+    shakeTimer = Math.max(shakeTimer, 5);
+  }
+
   function isTrafficBehind(obs) {
     return obs.y + obs.height * 0.4 > player.y + player.height * 0.45;
   }
@@ -781,12 +813,12 @@
   }
 
   function activeTrafficCount() {
-    return obstacles.filter((obs) => !obs.knockedOut).length;
+    return obstacles.filter((obs) => !obs.knockedOut && !obs.offRoadFall && !obs.exploded).length;
   }
 
   function trafficOverlapsOther(obs, skipIndex) {
     for (let i = 0; i < obstacles.length; i++) {
-      if (i === skipIndex || obstacles[i].knockedOut) continue;
+      if (i === skipIndex || obstacles[i].knockedOut || obstacles[i].offRoadFall || obstacles[i].exploded) continue;
       if (carsOverlap(obs, obstacles[i])) return true;
     }
     return false;
@@ -1087,6 +1119,7 @@
     trafficCarsSinceRammer = 0;
     trafficCarsSinceRepair = 0;
     trafficCarsSinceNitro = 0;
+    trafficCarsSinceBoost = 0;
     driftSparkTimer = 0;
     showLegend = perfProfile.showLegendDefault;
     lastTime = performance.now();
@@ -1650,22 +1683,29 @@
       trafficCarsSinceRammer = 0;
       return 'rammer';
     }
-    const roll = Math.random();
-    if (hitPoints < MAX_HIT_POINTS && roll < 0.38) return 'repair';
-    if (nitro < 35) {
-      if (roll < 0.72) return 'nitro';
+    if (trafficCarsSinceRepair >= REPAIR_TRAFFIC_INTERVAL) {
+      trafficCarsSinceRepair = 0;
+      return 'repair';
+    }
+    if (trafficCarsSinceNitro >= NITRO_TRAFFIC_INTERVAL) {
+      trafficCarsSinceNitro = 0;
+      return 'nitro';
+    }
+    if (trafficCarsSinceBoost >= BOOST_TRAFFIC_INTERVAL) {
+      trafficCarsSinceBoost = 0;
       return 'boost';
     }
-    if (roll < 0.78) return 'nitro';
-    return 'boost';
+    return null;
   }
 
   function spawnPickup() {
+    const type = pickPickupType();
+    if (!type) return;
+
     const lane = Math.floor(Math.random() * LANE_COUNT);
     const laneFraction = laneFractionAt(lane);
     const spawnY = -50;
     const centerY = spawnY + 20;
-    const type = pickPickupType();
     pickups.push({
       lane,
       laneFraction,
@@ -1992,7 +2032,7 @@
   function resolvePlayerCollisions(currentSpeed) {
     if (knockoutTimer > 0) {
       for (const obs of obstacles) {
-        if (obs.knockedOut) continue;
+        if (obs.knockedOut || obs.offRoadFall || obs.exploded) continue;
         if (!carsOverlap(player, obs)) continue;
         knockoutTraffic(obs, currentSpeed);
       }
@@ -2061,7 +2101,7 @@
         for (let j = i + 1; j < obstacles.length; j++) {
           const a = obstacles[i];
           const b = obstacles[j];
-          if (a.knockedOut || b.knockedOut) continue;
+          if (a.knockedOut || b.knockedOut || a.offRoadFall || b.offRoadFall || a.exploded || b.exploded) continue;
           if (!carsOverlap(a, b)) continue;
 
           const depth = overlapDepth(a, b);
@@ -2081,7 +2121,7 @@
     }
 
     obstacles.forEach((obs) => {
-      if (obs.knockedOut || obs.spinOutTimer > 0 || (obs.trafficContactTimer || 0) > 0) return;
+      if (obs.knockedOut || obs.offRoadFall || obs.exploded || obs.spinOutTimer > 0 || (obs.trafficContactTimer || 0) > 0) return;
       const centerY = obs.y + obs.height * 0.52;
       const laneX = laneXFromFraction(centerY, obs.laneFraction);
       const maxDrift = obs.width * 0.18;
@@ -2122,6 +2162,9 @@
       trafficContactTimer: 0,
     });
     trafficCarsSinceRammer += 1;
+    trafficCarsSinceRepair += 1;
+    trafficCarsSinceNitro += 1;
+    trafficCarsSinceBoost += 1;
   }
 
   function spawnExhaustParticles() {
@@ -2442,6 +2485,25 @@
     pickups = pickups.filter((pickup) => !pickup.collected && pickup.y < H + 40);
 
     obstacles.forEach((obs, obsIndex) => {
+      if (obs.exploded) return;
+
+      if (obs.offRoadFall) {
+        obs.offRoadTimer = (obs.offRoadTimer || 0) + dt;
+        obs.prevX = obs.x;
+        obs.vy = (obs.vy || 0) + OFF_ROAD_FALL_GRAVITY * dt * 60;
+        obs.x += (obs.vx || 0) * dt * 60;
+        obs.y += (obs.vy || 0) * dt * 60 + currentSpeed * 0.12;
+        obs.vx *= 1 - dt * 0.1;
+        if (obs.spinOutTimer > 0) {
+          obs.spinOutTimer -= dt;
+          obs.angle += (obs.spinOutRate || 0) * dt;
+        }
+        if (obs.offRoadTimer >= OFF_ROAD_EXPLODE_DELAY) {
+          explodeOffRoadTraffic(obs);
+        }
+        return;
+      }
+
       if (obs.trafficContactTimer > 0) obs.trafficContactTimer -= dt;
       if (!obs.knockedOut) clampTrafficSpeed(obs, currentSpeed);
       obs.prevX = obs.x;
@@ -2482,6 +2544,14 @@
         updateCarAngle(obs, lateralVel, forwardVel, steerHint, dt);
       }
 
+      if (shouldTriggerOffRoadFall(obs)) {
+        obs.offRoadFall = true;
+        obs.offRoadTimer = 0;
+        obs.passed = true;
+        obs.vy = Math.max((obs.vy || 0) + 5, 9);
+        return;
+      }
+
       if (!obs.passed && !obs.knockedOut && obs.y + obs.height * 0.5 > player.y + player.height * 0.5) {
         obs.passed = true;
         const passDx = Math.abs(player.x - obs.x);
@@ -2505,6 +2575,10 @@
     resolvePlayerCollisions(currentSpeed);
 
     obstacles = obstacles.filter((obs) => {
+      if (obs.exploded) return false;
+      if (obs.offRoadFall) {
+        return obs.y < H + 260 && obs.x > -obs.width * 3 && obs.x < W + obs.width * 3;
+      }
       if (obs.knockedOut) {
         return obs.y + obs.height > -TRAFFIC_CULL_ABOVE
           && obs.y < H + 180
@@ -2842,8 +2916,8 @@
       if (obs.exploded) return;
       if (obs.y + obs.height < -8) return;
 
-      const enterFade = obs.knockedOut
-        ? 1
+      const enterFade = obs.knockedOut || obs.offRoadFall
+        ? (obs.offRoadFall ? Math.max(0.35, 1 - (obs.offRoadTimer || 0) * 0.22) : 1)
         : Math.min(1, (obs.y + obs.height) / 90);
       if (enterFade <= 0) return;
       const fogFade = fogVisibilityAtY(obs.y + obs.height * 0.5);
@@ -3658,9 +3732,6 @@
         drawThemeBanner();
         if (showLegend) drawLegend();
       }
-      if (state === STATE.PAUSED) {
-        drawPauseOverlay();
-      }
     }
 
     const showEdgeDebug = state === STATE.PLAYING
@@ -3675,6 +3746,7 @@
     const hudVisible = state === STATE.PLAYING || state === STATE.PAUSED || state === STATE.COUNTDOWN;
     setHudOverlayVisible(hudVisible);
     if (hudVisible) updateHtmlHud();
+    if (state === STATE.PAUSED) drawPauseOverlay();
   }
 
   function gameLoop(timestamp) {
@@ -3789,9 +3861,16 @@
     const container = document.getElementById('game-container');
     if (!container) return;
 
+    const cW = container.clientWidth;
     const cH = container.clientHeight;
-    BASE_H = Math.max(360, cH);
-    BASE_W = Math.max(640, Math.round(BASE_H * REF_ASPECT));
+    let baseW = cW;
+    let baseH = Math.round(cW / REF_ASPECT);
+    if (baseH > cH) {
+      baseH = cH;
+      baseW = Math.round(cH * REF_ASPECT);
+    }
+    BASE_W = Math.max(320, baseW);
+    BASE_H = Math.max(180, baseH);
 
     W = Math.max(640, Math.round(BASE_W * perfProfile.renderScale));
     H = Math.max(360, Math.round(BASE_H * perfProfile.renderScale));
