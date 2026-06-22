@@ -66,6 +66,7 @@
   let CURVE_AMPLITUDE = 0;
   const CURVE_NORMAL_MIN = 0.42;
   const CURVE_MARGIN_REACH = 1.06;
+  const STEER_CURVE_SAFETY = 0.9;
   const STRAIGHT_SEGMENT_MIN = 580;
   const STRAIGHT_SEGMENT_MAX = 1120;
   const CURVE_SEGMENT_MIN = 720;
@@ -262,9 +263,42 @@
     return Math.max(leftOffset, rightOffset, ROAD_WIDTH) * CURVE_MARGIN_REACH;
   }
 
+  function getWorstSteerMult() {
+    return CAR_TYPES.reduce((min, car) => Math.min(min, car.steerMult), 1.4);
+  }
+
+  function getSteerLateralPerSecond() {
+    const steerMult = activeCar?.steerMult ?? getWorstSteerMult();
+    const grip = WEATHER_GRIP.rain;
+    return STEER_BASE * steerMult * grip * 60;
+  }
+
+  function maxOffsetDeltaForSegment(segLen, forwardSpeed) {
+    const steerRate = getSteerLateralPerSecond() * STEER_CURVE_SAFETY;
+    const speedPerSecond = Math.max(forwardSpeed, kmhToSpeed(LAUNCH_SPEED_KMH)) * 60;
+    return steerRate * segLen * 2 / (Math.PI * speedPerSecond);
+  }
+
+  function getSteerBasedMaxCurveOffset() {
+    const highSpeed = kmhToSpeed(NITRO_MAX_SPEED_KMH);
+    const maxDelta = maxOffsetDeltaForSegment(CURVE_SEGMENT_MIN, highSpeed);
+    return maxDelta * 2.1;
+  }
+
+  function clampCurveOffset(targetOffset, lastOffset, segLen) {
+    const maxAbs = Math.min(getMaxCurveOffset(), getSteerBasedMaxCurveOffset());
+    let offset = Math.max(-maxAbs, Math.min(maxAbs, targetOffset));
+    const maxDelta = maxOffsetDeltaForSegment(segLen, kmhToSpeed(NITRO_MAX_SPEED_KMH));
+    const delta = offset - lastOffset;
+    if (Math.abs(delta) > maxDelta) {
+      offset = lastOffset + Math.sign(delta) * maxDelta;
+    }
+    return offset;
+  }
+
   function syncCanvasMetrics() {
     ROAD_WIDTH = ROAD_CAR_WIDTHS * REFERENCE_CAR_WIDTH;
-    CURVE_AMPLITUDE = getMaxCurveOffset();
+    CURVE_AMPLITUDE = Math.min(getMaxCurveOffset(), getSteerBasedMaxCurveOffset());
   }
 
   function setLoadingProgress(loaded, total, label) {
@@ -529,7 +563,7 @@
       offset = last.offset;
     } else {
       segLen = CURVE_SEGMENT_MIN + Math.random() * (CURVE_SEGMENT_MAX - CURVE_SEGMENT_MIN);
-      offset = pickCurveTarget(last.offset);
+      offset = clampCurveOffset(pickCurveTarget(last.offset), last.offset, segLen);
     }
     roadCurveAnchors.push({ wy: last.wy + segLen, offset, type });
   }
@@ -944,6 +978,7 @@
     showLegend = perfProfile.showLegendDefault;
     lastTime = performance.now();
     simAccumulator = 0;
+    syncCanvasMetrics();
     initRoadCurve();
     weatherType = pickWeather(activeTheme);
     if (weatherType === 'snow') initWeatherSnow();
