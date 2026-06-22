@@ -2298,7 +2298,7 @@
     player.prevX = player.x;
 
     const skipCountdown = keys[' '] || keys.Space;
-    countdownTimer -= dt * (skipCountdown ? 2 : 1);
+    countdownTimer -= dt * (skipCountdown ? 3 : 1);
     if (countdownTimer <= 0) {
       state = STATE.PLAYING;
       countdownTimer = 0;
