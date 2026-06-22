@@ -926,9 +926,70 @@
     return phase < SPEED_STRIP_LENGTH;
   }
 
+  function setHudOverlayVisible(visible) {
+    const overlay = document.getElementById('hud-overlay');
+    if (overlay) overlay.classList.toggle('hidden', !visible);
+  }
+
+  function updateHtmlHud() {
+    const hpPanel = document.getElementById('hud-hp');
+    const hpValue = document.getElementById('hud-hp-value');
+    const scoreValue = document.getElementById('hud-score-value');
+    const distanceValue = document.getElementById('hud-distance-value');
+    const speedValue = document.getElementById('hud-speed-value');
+    const carName = document.getElementById('hud-car-name');
+    const nitroPanel = document.getElementById('hud-nitro');
+    const nitroFill = document.getElementById('hud-nitro-fill');
+    const nitroPct = document.getElementById('hud-nitro-pct');
+    const envBadge = document.getElementById('hud-env');
+    const nitroBoost = document.getElementById('hud-nitro-boost');
+    const comboPanel = document.getElementById('hud-combo');
+    const comboMain = document.getElementById('hud-combo-main');
+    const comboSub = document.getElementById('hud-combo-sub');
+    if (!hpPanel || !scoreValue || !nitroFill) return;
+
+    hpPanel.classList.toggle('critical', hitPoints <= 1);
+    if (hpValue) hpValue.textContent = String(hitPoints);
+    document.querySelectorAll('.hud-hp-seg').forEach((seg, index) => {
+      seg.classList.toggle('filled', index < hitPoints);
+    });
+
+    scoreValue.textContent = Math.floor(score).toLocaleString();
+    if (distanceValue) distanceValue.textContent = String(Math.floor(distance));
+    if (speedValue) speedValue.textContent = String(Math.round(hudSpeedKmh));
+    if (carName) carName.textContent = activeCar.name.toUpperCase();
+
+    nitroFill.style.width = `${Math.max(0, Math.min(100, nitro))}%`;
+    if (nitroPct) nitroPct.textContent = `${Math.floor(nitro)}%`;
+    nitroPanel.classList.toggle('active', nitroActive);
+    if (nitroBoost) nitroBoost.classList.toggle('hidden', !nitroActive);
+
+    const lighting = getDayNightLighting();
+    if (envBadge) {
+      const showEnv = themeBannerTimer <= 0;
+      envBadge.classList.toggle('hidden', !showEnv);
+      envBadge.classList.toggle('night', lighting.isNight);
+      if (showEnv) {
+        envBadge.textContent = `${WEATHER_LABELS[weatherType]} · ${lighting.label}`;
+      }
+    }
+
+    if (comboPanel && comboMain && comboSub) {
+      const showCombo = combo > 1 || scoreMultiplier > 1.01;
+      comboPanel.classList.toggle('hidden', !showCombo);
+      if (showCombo) {
+        comboMain.textContent = combo > 1 ? `COMBO x${combo}` : '';
+        comboSub.textContent = scoreMultiplier > 1.01 ? `${scoreMultiplier.toFixed(1)}x score` : '';
+        comboSub.style.display = scoreMultiplier > 1.01 ? 'block' : 'none';
+        comboMain.style.display = combo > 1 ? 'block' : 'none';
+      }
+    }
+  }
+
   function showTitle() {
     state = STATE.TITLE;
     pickRandomCar();
+    setHudOverlayVisible(false);
     document.getElementById('title-screen').classList.remove('hidden');
     document.getElementById('title-screen').classList.add('active');
     document.getElementById('game-over-screen').classList.add('hidden');
@@ -937,6 +998,8 @@
   function startGame() {
     state = STATE.COUNTDOWN;
     countdownTimer = COUNTDOWN_DURATION;
+    setHudOverlayVisible(true);
+    updateHtmlHud();
     document.getElementById('title-screen').classList.add('hidden');
     document.getElementById('game-over-screen').classList.add('hidden');
 
@@ -1000,6 +1063,7 @@
 
   function gameOver() {
     state = STATE.GAMEOVER;
+    setHudOverlayVisible(false);
     stopEngineSound();
     if (!fatalCrash) playCrashSound();
     document.getElementById('final-score').textContent = Math.floor(score).toLocaleString();
@@ -2716,6 +2780,52 @@
     ctx.globalAlpha = 1;
   }
 
+  function drawRammerCountdown() {
+    if (knockoutTimer <= 0 || fatalCrash) return;
+
+    const pulse = 0.65 + Math.sin(animFrame * 0.18) * 0.35;
+    const cx = player.x;
+    const cy = player.y + player.height * 0.82;
+    const radius = 20 + pulse * 3;
+    const progress = knockoutTimer / KNOCKOUT_DURATION;
+    const seconds = Math.ceil(knockoutTimer);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius + 7, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(180, 77, 255, ${0.22 + pulse * 0.28})`;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#b44dff';
+    ctx.shadowBlur = 10 + pulse * 10;
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+    ctx.strokeStyle = '#ff2d95';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    ctx.fillStyle = `rgba(8, 6, 18, ${0.86 + pulse * 0.08})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius - 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 17px Orbitron, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ff2d95';
+    ctx.shadowBlur = 10;
+    ctx.fillText(String(seconds), cx, cy - 1);
+    ctx.font = '700 7px Orbitron, sans-serif';
+    ctx.fillStyle = '#ff6eb4';
+    ctx.shadowBlur = 6;
+    ctx.fillText('RAM', cx, cy + radius + 11);
+    ctx.restore();
+  }
+
   function drawLegendSwatch(type, x, y, w, h) {
     ctx.save();
     if (type === 'edge-neon') {
@@ -3242,58 +3352,7 @@
     ctx.restore();
   }
 
-  function drawHUD() {
-    const tints = getHudTints();
-    const lighting = getDayNightLighting();
-    ctx.save();
-    if (lighting.isNight) ctx.globalAlpha = tints.panelAlpha;
-    drawHitPointsHud();
 
-    const panelW = 220;
-    const panelH = 88;
-    const panelY = 76;
-    const kmh = Math.round(hudSpeedKmh);
-    const speedAccent = tints.speed;
-    const scorePanelAccent = lighting.isNight ? 'rgba(120, 190, 255, 0.75)' : 'rgba(255, 225, 77, 0.85)';
-
-    drawHudPanel(16, panelY, panelW, panelH, scorePanelAccent);
-    drawHudStat(30, panelY + 18, 'SCORE', Math.floor(score).toLocaleString(), '', tints.score, 28, panelW);
-    drawHudStat(30, panelY + 54, 'DISTANCE', `${Math.floor(distance)}`, 'm', tints.distance, 20, panelW);
-
-    const speedPanelX = W - panelW - 16;
-    drawHudPanel(speedPanelX, panelY, panelW, panelH, speedAccent);
-    drawHudStat(speedPanelX + 14, panelY + 18, 'VELOCITY', `${kmh}`, 'km/h', speedAccent, 36, panelW);
-
-    ctx.textAlign = 'right';
-    ctx.font = '600 11px Rajdhani, sans-serif';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-    ctx.fillText(activeCar.name.toUpperCase(), speedPanelX + panelW - 14, panelY + panelH - 10);
-
-    const nitroW = 204;
-    const nitroX = 16;
-    const nitroY = H - 50;
-    drawHudPanel(nitroX, nitroY - 16, nitroW, 38, nitroActive ? 'rgba(255, 110, 180, 0.9)' : 'rgba(0, 240, 255, 0.55)', { compact: true });
-    drawNitroBar(nitroX, nitroY, nitroW);
-
-    if (nitroActive) {
-      ctx.textAlign = 'center';
-      ctx.font = '700 13px Orbitron, sans-serif';
-      const boostGrad = ctx.createLinearGradient(W / 2 - 80, 0, W / 2 + 80, 0);
-      boostGrad.addColorStop(0, '#00f0ff');
-      boostGrad.addColorStop(0.5, '#ffffff');
-      boostGrad.addColorStop(1, '#ff2d95');
-      ctx.fillStyle = boostGrad;
-      ctx.shadowColor = '#ff2d95';
-      ctx.shadowBlur = 14;
-      ctx.fillText('◆ NITRO BOOST ◆', W / 2, 72);
-      ctx.shadowBlur = 0;
-    }
-
-    drawEnvironmentBadge();
-    drawKnockoutBadge();
-    drawComboBadge();
-    ctx.restore();
-  }
 
   function roundRect(c, x, y, w, h, r) {
     c.beginPath();
@@ -3370,6 +3429,7 @@
       drawObstacles();
       if (!fatalCrash) drawPlayerHeadlights();
       drawPlayer();
+      drawRammerCountdown();
       drawFatalCrashExplosions();
       drawParticles();
       drawRain();
@@ -3385,16 +3445,15 @@
       }
     }
 
-    if (state !== STATE.LOADING) {
-      setEdgeMarginDebugVisible(true);
-      drawEdgeMarginDebugMarkers();
-    } else {
-      setEdgeMarginDebugVisible(false);
-    }
+    const showEdgeDebug = state !== STATE.PLAYING
+      && state !== STATE.COUNTDOWN
+      && state !== STATE.LOADING;
+    setEdgeMarginDebugVisible(showEdgeDebug);
+    if (showEdgeDebug) drawEdgeMarginDebugMarkers();
 
-    if (state === STATE.PLAYING) {
-      drawHUD();
-    }
+    const hudVisible = state === STATE.PLAYING || state === STATE.COUNTDOWN;
+    setHudOverlayVisible(hudVisible);
+    if (hudVisible) updateHtmlHud();
 
     ctx.restore();
   }
@@ -3509,6 +3568,12 @@
     canvas.height = H;
     canvas.style.width = `${BASE_W}px`;
     canvas.style.height = `${BASE_H}px`;
+
+    const stage = document.getElementById('game-stage');
+    if (stage) {
+      stage.style.width = `${BASE_W}px`;
+      stage.style.height = `${BASE_H}px`;
+    }
 
     syncCanvasMetrics();
     syncPlayerScreenY();

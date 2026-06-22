@@ -42,11 +42,276 @@
       touch-action: none;
     }
 
+    #game-stage {
+      position: relative;
+      line-height: 0;
+    }
+
     canvas {
       display: block;
       box-shadow: 0 0 60px rgba(255, 45, 149, 0.25), 0 0 120px rgba(0, 240, 255, 0.1);
       border: 1px solid rgba(0, 240, 255, 0.2);
       touch-action: none;
+    }
+
+    .hud-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 200;
+      font-family: 'Rajdhani', sans-serif;
+      color: #fff;
+    }
+
+    .hud-panel {
+      position: absolute;
+      background: linear-gradient(145deg, rgba(14, 16, 28, 0.96), rgba(6, 8, 16, 0.94));
+      border: 1.5px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      box-shadow: 0 0 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+
+    .hud-hp {
+      top: 1.2%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(248px, 42%);
+      height: 54px;
+      padding: 8px 16px;
+      border-color: rgba(127, 255, 159, 0.45);
+      box-shadow: 0 0 16px rgba(127, 255, 159, 0.2);
+    }
+
+    .hud-hp.critical { border-color: rgba(255, 45, 149, 0.65); box-shadow: 0 0 16px rgba(255, 45, 149, 0.25); }
+
+    .hud-hp-label {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: rgba(255, 255, 255, 0.55);
+    }
+
+    .hud-hp-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 6px;
+    }
+
+    .hud-hp-segments {
+      display: flex;
+      gap: 8px;
+    }
+
+    .hud-hp-seg {
+      width: 52px;
+      height: 10px;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .hud-hp-seg.filled {
+      background: linear-gradient(90deg, #ff2d95, #ff6eb4);
+      border-color: rgba(255, 45, 149, 0.5);
+      box-shadow: 0 0 10px rgba(255, 45, 149, 0.45);
+    }
+
+    .hud-hp-value {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 0 8px rgba(127, 255, 159, 0.5);
+    }
+
+    .hud-hp.critical .hud-hp-value { text-shadow: 0 0 8px rgba(255, 45, 149, 0.6); }
+
+    .hud-hp-max {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.45);
+      margin-left: 2px;
+    }
+
+    .hud-score-block {
+      top: 10.5%;
+      left: 1.25%;
+      width: min(220px, 36%);
+      padding: 12px 14px 10px;
+      border-color: rgba(255, 225, 77, 0.55);
+      box-shadow: 0 0 16px rgba(255, 225, 77, 0.15);
+    }
+
+    .hud-speed-block {
+      top: 10.5%;
+      right: 1.25%;
+      width: min(220px, 36%);
+      padding: 12px 14px 10px;
+      border-color: rgba(255, 225, 77, 0.45);
+      box-shadow: 0 0 16px rgba(255, 225, 77, 0.12);
+    }
+
+    .hud-stat-label {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .hud-stat-value {
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 700;
+      line-height: 1.1;
+      margin-top: 4px;
+      background: linear-gradient(90deg, #fff, var(--neon-yellow));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 0 6px rgba(255, 225, 77, 0.35));
+    }
+
+    .hud-stat-value.speed {
+      font-size: clamp(28px, 4.5vw, 36px);
+      background: linear-gradient(90deg, #fff, var(--neon-yellow));
+      -webkit-background-clip: text;
+      background-clip: text;
+    }
+
+    .hud-stat-value.score { font-size: clamp(22px, 3.5vw, 28px); }
+
+    .hud-stat-unit {
+      font-size: 12px;
+      color: var(--neon-yellow);
+      margin-left: 4px;
+      vertical-align: super;
+    }
+
+    .hud-stat-sub {
+      margin-top: 8px;
+    }
+
+    .hud-stat-sub .hud-stat-value {
+      font-size: clamp(16px, 2.5vw, 20px);
+      background: linear-gradient(90deg, #fff, var(--neon-cyan));
+      -webkit-background-clip: text;
+      background-clip: text;
+    }
+
+    .hud-car-name {
+      position: absolute;
+      right: 14px;
+      bottom: 8px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.35);
+      letter-spacing: 0.06em;
+    }
+
+    .hud-nitro {
+      bottom: 3.5%;
+      left: 1.25%;
+      width: min(204px, 34%);
+      padding: 10px 14px 8px;
+      border-color: rgba(0, 240, 255, 0.5);
+      box-shadow: 0 0 16px rgba(0, 240, 255, 0.15);
+    }
+
+    .hud-nitro.active {
+      border-color: rgba(255, 110, 180, 0.85);
+      box-shadow: 0 0 20px rgba(255, 45, 149, 0.35);
+    }
+
+    .hud-nitro-label {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: rgba(255, 255, 255, 0.55);
+      text-align: center;
+      margin-bottom: 6px;
+    }
+
+    .hud-nitro-track {
+      height: 12px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.4);
+      overflow: hidden;
+    }
+
+    .hud-nitro-fill {
+      height: 100%;
+      width: 100%;
+      border-radius: 6px;
+      background: linear-gradient(90deg, #00f0ff, #6e7bff, #ff2d95);
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+      transition: width 0.08s linear;
+    }
+
+    .hud-nitro.active .hud-nitro-fill {
+      box-shadow: 0 0 14px rgba(255, 45, 149, 0.65);
+    }
+
+    .hud-nitro-pct {
+      text-align: center;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.45);
+      margin-top: 4px;
+    }
+
+    .hud-nitro.active .hud-nitro-pct { color: #ff9fd0; }
+
+    .hud-env {
+      position: absolute;
+      top: 1.2%;
+      right: 1.25%;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #ffe8a8;
+      background: rgba(10, 12, 22, 0.9);
+      border: 1px solid rgba(255, 225, 120, 0.35);
+      border-radius: 6px;
+    }
+
+    .hud-env.night { color: #b8d8ff; border-color: rgba(120, 180, 255, 0.4); }
+
+    .hud-combo {
+      position: absolute;
+      top: 24%;
+      right: 1.25%;
+      padding: 8px 14px;
+      text-align: center;
+      border-color: rgba(255, 110, 180, 0.65);
+      box-shadow: 0 0 14px rgba(255, 45, 149, 0.25);
+    }
+
+    .hud-combo-main {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      color: #ff9fd0;
+      text-shadow: 0 0 10px rgba(255, 45, 149, 0.5);
+    }
+
+    .hud-combo-sub {
+      font-size: 11px;
+      color: var(--neon-yellow);
+      margin-top: 2px;
+    }
+
+    .hud-nitro-boost {
+      position: absolute;
+      top: 9%;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: 'Orbitron', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #fff;
+      text-shadow: 0 0 14px #ff2d95, 0 0 8px #00f0ff;
+      white-space: nowrap;
     }
 
     .edge-debug-marker {
@@ -520,7 +785,46 @@
       <div class="loading-bar"><div id="loading-fill" class="loading-bar-fill"></div></div>
     </div>
 
-    <canvas id="game-canvas" width="1280" height="720"></canvas>
+    <div id="game-stage">
+      <canvas id="game-canvas" width="1280" height="720"></canvas>
+      <div id="hud-overlay" class="hud-overlay hidden">
+        <div id="hud-hp" class="hud-panel hud-hp">
+          <div class="hud-hp-label">ARMOR</div>
+          <div class="hud-hp-row">
+            <div class="hud-hp-segments">
+              <span class="hud-hp-seg" data-hp="0"></span>
+              <span class="hud-hp-seg" data-hp="1"></span>
+              <span class="hud-hp-seg" data-hp="2"></span>
+            </div>
+            <div><span id="hud-hp-value" class="hud-hp-value">3</span><span class="hud-hp-max">/ 3</span></div>
+          </div>
+        </div>
+        <div id="hud-env" class="hud-env hidden"></div>
+        <div id="hud-nitro-boost" class="hud-nitro-boost hidden">◆ NITRO BOOST ◆</div>
+        <div class="hud-panel hud-score-block">
+          <div class="hud-stat-label">SCORE</div>
+          <div id="hud-score-value" class="hud-stat-value score">0</div>
+          <div class="hud-stat-sub">
+            <div class="hud-stat-label">DISTANCE</div>
+            <div><span id="hud-distance-value" class="hud-stat-value">0</span><span class="hud-stat-unit">m</span></div>
+          </div>
+        </div>
+        <div class="hud-panel hud-speed-block">
+          <div class="hud-stat-label">VELOCITY</div>
+          <div><span id="hud-speed-value" class="hud-stat-value speed">0</span><span class="hud-stat-unit">km/h</span></div>
+          <div id="hud-car-name" class="hud-car-name">CAR</div>
+        </div>
+        <div id="hud-nitro" class="hud-panel hud-nitro">
+          <div class="hud-nitro-label">NITRO</div>
+          <div class="hud-nitro-track"><div id="hud-nitro-fill" class="hud-nitro-fill"></div></div>
+          <div id="hud-nitro-pct" class="hud-nitro-pct">100%</div>
+        </div>
+        <div id="hud-combo" class="hud-panel hud-combo hidden">
+          <div id="hud-combo-main" class="hud-combo-main"></div>
+          <div id="hud-combo-sub" class="hud-combo-sub"></div>
+        </div>
+      </div>
+    </div>
     <div id="edge-marker-left" class="edge-debug-marker hidden" aria-hidden="true"></div>
     <div id="edge-marker-right" class="edge-debug-marker hidden" aria-hidden="true"></div>
 
@@ -599,6 +903,6 @@
 
   <script src="cars.js?v=15"></script>
   <script src="themes.js?v=15"></script>
-  <script src="game.js?v=55"></script>
+  <script src="game.js?v=56"></script>
 </body>
 </html>
