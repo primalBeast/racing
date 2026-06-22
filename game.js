@@ -1076,7 +1076,7 @@
     speedBoostTimer = 0;
     knockoutTimer = 0;
     themeBannerTimer = 3.2;
-    pickupSpawnTimer = 2.5;
+    pickupSpawnTimer = 0.8;
     driftSparkTimer = 0;
     showLegend = perfProfile.showLegendDefault;
     lastTime = performance.now();
@@ -1635,20 +1635,24 @@
     pickup.collected = true;
   }
 
+  function pickPickupType() {
+    const roll = Math.random();
+    if (roll < 0.20) return 'rammer';
+    if (hitPoints < MAX_HIT_POINTS && roll < 0.38) return 'repair';
+    if (nitro < 35) {
+      if (roll < 0.72) return 'nitro';
+      return 'boost';
+    }
+    if (roll < 0.78) return 'nitro';
+    return 'boost';
+  }
+
   function spawnPickup() {
     const lane = Math.floor(Math.random() * LANE_COUNT);
     const laneFraction = laneFractionAt(lane);
     const spawnY = -50;
     const centerY = spawnY + 20;
-    const roll = Math.random();
-    let type = 'boost';
-    if (roll < 0.12) {
-      type = 'rammer';
-    } else if (hitPoints < MAX_HIT_POINTS && roll < 0.42) {
-      type = 'repair';
-    } else if (roll < 0.74) {
-      type = 'nitro';
-    }
+    const type = pickPickupType();
     pickups.push({
       lane,
       laneFraction,
@@ -2391,7 +2395,7 @@
     pickupSpawnTimer -= dt;
     if (pickupSpawnTimer <= 0) {
       spawnPickup();
-      pickupSpawnTimer = 4 + Math.random() * 5;
+      pickupSpawnTimer = 1.8 + Math.random() * 1.7;
     }
 
     pickups.forEach((pickup) => {
@@ -3423,6 +3427,7 @@
 
   function drawHUD() {
     ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
     ctx.setLineDash([]);
@@ -3614,11 +3619,11 @@
     ctx.restore();
 
     const hudVisible = state === STATE.PLAYING || state === STATE.COUNTDOWN;
+    setHudOverlayVisible(hudVisible);
     if (hudVisible) {
       drawHUD();
       updateHtmlHud();
     }
-    setHudOverlayVisible(false);
   }
 
   function gameLoop(timestamp) {

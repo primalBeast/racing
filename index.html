@@ -46,6 +46,7 @@
       position: relative;
       line-height: normal;
       overflow: visible;
+      z-index: 1;
     }
 
     canvas {
@@ -59,17 +60,17 @@
       position: absolute;
       inset: 0;
       pointer-events: none;
-      z-index: 200;
+      z-index: 500;
       font-family: 'Rajdhani', sans-serif;
       color: #fff;
     }
 
     .hud-panel {
       position: absolute;
-      background: linear-gradient(145deg, rgba(14, 16, 28, 0.96), rgba(6, 8, 16, 0.94));
-      border: 1.5px solid rgba(255, 255, 255, 0.12);
+      background: linear-gradient(145deg, rgba(18, 20, 34, 0.98), rgba(8, 10, 20, 0.97));
+      border: 2px solid rgba(255, 255, 255, 0.28);
       border-radius: 10px;
-      box-shadow: 0 0 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      box-shadow: 0 0 24px rgba(0, 0, 0, 0.65), 0 0 12px rgba(0, 240, 255, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.12);
     }
 
     .hud-hp {
@@ -138,19 +139,21 @@
     .hud-score-block {
       top: 10.5%;
       left: 1.25%;
-      width: min(220px, 36%);
+      width: min(220px, 38%);
+      min-width: 148px;
       padding: 12px 14px 10px;
-      border-color: rgba(255, 225, 77, 0.55);
-      box-shadow: 0 0 16px rgba(255, 225, 77, 0.15);
+      border-color: rgba(255, 225, 77, 0.85);
+      box-shadow: 0 0 20px rgba(255, 225, 77, 0.35);
     }
 
     .hud-speed-block {
       top: 10.5%;
       right: 1.25%;
-      width: min(220px, 36%);
+      width: min(220px, 38%);
+      min-width: 148px;
       padding: 12px 14px 10px;
-      border-color: rgba(255, 225, 77, 0.45);
-      box-shadow: 0 0 16px rgba(255, 225, 77, 0.12);
+      border-color: rgba(255, 225, 77, 0.85);
+      box-shadow: 0 0 20px rgba(255, 225, 77, 0.35);
     }
 
     .hud-stat-label {
@@ -210,10 +213,11 @@
     .hud-nitro {
       bottom: 3.5%;
       left: 1.25%;
-      width: min(204px, 34%);
+      width: min(204px, 36%);
+      min-width: 140px;
       padding: 10px 14px 8px;
-      border-color: rgba(0, 240, 255, 0.5);
-      box-shadow: 0 0 16px rgba(0, 240, 255, 0.15);
+      border-color: rgba(0, 240, 255, 0.85);
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.35);
     }
 
     .hud-nitro.active {
@@ -319,7 +323,7 @@
       transform: translateY(-50%);
       width: 6px;
       height: 42vh;
-      z-index: 150;
+      z-index: 80;
       pointer-events: none;
       border-radius: 3px;
       background: linear-gradient(180deg, #ff2d95 0%, #ffe14d 50%, #ff2d95 100%);
@@ -902,6 +906,6 @@
 
   <script src="cars.js?v=15"></script>
   <script src="themes.js?v=15"></script>
-  <script src="game.js?v=60"></script>
+  <script src="game.js?v=61"></script>
 </body>
 </html>
