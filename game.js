@@ -3238,23 +3238,51 @@
     ctx.stroke();
   }
 
-  function drawHitPointsHud() {
-    const panelW = 248;
-    const panelH = 54;
+  function getHudLayout() {
+    const marginX = Math.max(10, W * 0.0125);
+    const marginY = Math.max(8, H * 0.012);
+    const panelW = Math.min(220, W * 0.19);
+    const statPanelH = Math.max(72, H * 0.12);
+    const topRowY = Math.max(64, H * 0.095);
+    const hpPanelW = Math.min(248, W * 0.34);
+    const hpPanelH = Math.max(48, H * 0.075);
+    const nitroW = Math.min(204, W * 0.18);
+    const nitroPanelH = Math.max(34, H * 0.052);
+    return {
+      marginX,
+      marginY,
+      panelW,
+      statPanelH,
+      topRowY,
+      hpPanelW,
+      hpPanelH,
+      nitroW,
+      nitroPanelH,
+      nitroY: H - Math.max(42, H * 0.07),
+      scoreValueSize: Math.max(22, Math.round(H * 0.039)),
+      speedValueSize: Math.max(28, Math.round(H * 0.05)),
+      distanceValueSize: Math.max(16, Math.round(H * 0.028)),
+    };
+  }
+
+  function drawHitPointsHud(layout = getHudLayout()) {
+    const panelW = layout.hpPanelW;
+    const panelH = layout.hpPanelH;
     const x = W / 2 - panelW / 2;
-    const y = 10;
+    const y = layout.marginY;
     const accent = hitPoints <= 1 ? '#ff2d95' : '#7fff9f';
+    const pad = Math.max(12, panelW * 0.07);
 
     drawHudPanel(x, y, panelW, panelH, accent, { compact: true });
 
     ctx.textAlign = 'left';
     ctx.font = '700 9px Orbitron, sans-serif';
     ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-    ctx.fillText('ARMOR', x + 18, y + 18);
+    ctx.fillText('ARMOR', x + pad, y + 18);
 
-    const segW = 52;
+    const segW = Math.max(36, (panelW - pad * 2 - 16) / MAX_HIT_POINTS - 8);
     const segH = 10;
-    const segStartX = x + 18;
+    const segStartX = x + pad;
     const segY = y + 26;
     for (let i = 0; i < MAX_HIT_POINTS; i++) {
       const filled = i < hitPoints;
@@ -3458,14 +3486,14 @@
     ctx.fillText(`${Math.floor(nitro)}%`, x + w / 2, barY + barH + 12);
   }
 
-  function drawEnvironmentBadge() {
+  function drawEnvironmentBadge(layout = getHudLayout()) {
     if (themeBannerTimer > 0) return;
     const lighting = getDayNightLighting();
     const label = `${WEATHER_LABELS[weatherType]} · ${lighting.label}`;
-    const badgeW = 168;
+    const badgeW = Math.min(168, W * 0.22);
     const badgeH = 22;
-    const x = W - badgeW - 16;
-    const y = 10;
+    const x = W - badgeW - layout.marginX;
+    const y = layout.marginY;
     ctx.save();
     ctx.globalAlpha = lighting.isNight ? 0.82 : 0.9;
     drawHudPanel(x, y, badgeW, badgeH, lighting.isNight ? 'rgba(120, 180, 255, 0.45)' : 'rgba(255, 225, 120, 0.4)', { compact: true });
@@ -3500,13 +3528,13 @@
     ctx.restore();
   }
 
-  function drawComboBadge() {
+  function drawComboBadge(layout = getHudLayout()) {
     if (combo <= 1 && scoreMultiplier <= 1.01) return;
 
-    const badgeW = 148;
+    const badgeW = Math.min(148, W * 0.2);
     const badgeH = 38;
-    const x = W - badgeW - 16;
-    const y = 172;
+    const x = W - badgeW - layout.marginX;
+    const y = layout.topRowY + layout.statPanelH + 8;
     drawHudPanel(x, y, badgeW, badgeH, '#ff6eb4', { compact: true });
 
     ctx.textAlign = 'center';
@@ -3529,6 +3557,7 @@
   }
 
   function drawHUD() {
+    const layout = getHudLayout();
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
@@ -3541,39 +3570,63 @@
     const lighting = getDayNightLighting();
     if (lighting.isNight) ctx.globalAlpha = Math.max(0.95, tints.panelAlpha);
 
-    drawHitPointsHud();
+    drawHitPointsHud(layout);
 
-    const panelW = 220;
-    const panelY = 76;
+    const { panelW, statPanelH, topRowY, marginX, nitroW, nitroY, nitroPanelH } = layout;
     const kmh = Math.round(hudSpeedKmh);
     const speedAccent = tints.speed;
     const scorePanelAccent = lighting.isNight ? 'rgba(120, 190, 255, 0.9)' : 'rgba(255, 225, 77, 0.95)';
+    const statPad = Math.max(12, panelW * 0.07);
 
-    drawHudPanel(16, panelY, panelW, 88, scorePanelAccent);
-    drawHudStat(30, panelY + 18, 'SCORE', Math.floor(score).toLocaleString(), '', tints.score, 28, panelW);
-    drawHudStat(30, panelY + 54, 'DISTANCE', `${Math.floor(distance)}`, 'm', tints.distance, 20, panelW);
+    drawHudPanel(marginX, topRowY, panelW, statPanelH, scorePanelAccent);
+    drawHudStat(
+      marginX + statPad,
+      topRowY + 18,
+      'SCORE',
+      Math.floor(score).toLocaleString(),
+      '',
+      tints.score,
+      layout.scoreValueSize,
+      panelW
+    );
+    drawHudStat(
+      marginX + statPad,
+      topRowY + 18 + layout.scoreValueSize + 14,
+      'DISTANCE',
+      `${Math.floor(distance)}`,
+      'm',
+      tints.distance,
+      layout.distanceValueSize,
+      panelW
+    );
 
-    const speedPanelX = W - panelW - 16;
-    drawHudPanel(speedPanelX, panelY, panelW, 88, speedAccent);
-    drawHudStat(speedPanelX + 14, panelY + 18, 'VELOCITY', `${kmh}`, 'km/h', speedAccent, 36, panelW);
+    const speedPanelX = W - panelW - marginX;
+    drawHudPanel(speedPanelX, topRowY, panelW, statPanelH, speedAccent);
+    drawHudStat(
+      speedPanelX + statPad,
+      topRowY + 18,
+      'VELOCITY',
+      `${kmh}`,
+      'km/h',
+      speedAccent,
+      layout.speedValueSize,
+      panelW
+    );
 
     ctx.textAlign = 'right';
     ctx.font = '600 11px Rajdhani, sans-serif';
     ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-    ctx.fillText(activeCar.name.toUpperCase(), speedPanelX + panelW - 14, panelY + 78);
+    ctx.fillText(activeCar.name.toUpperCase(), speedPanelX + panelW - statPad, topRowY + statPanelH - 10);
 
-    const nitroW = 204;
-    const nitroX = 16;
-    const nitroY = H - 50;
     drawHudPanel(
-      nitroX,
-      nitroY - 16,
+      marginX,
+      nitroY - nitroPanelH + 6,
       nitroW,
-      38,
+      nitroPanelH,
       nitroActive ? 'rgba(255, 110, 180, 0.95)' : 'rgba(0, 240, 255, 0.75)',
       { compact: true }
     );
-    drawNitroBar(nitroX, nitroY, nitroW);
+    drawNitroBar(marginX, nitroY, nitroW);
 
     if (nitroActive) {
       ctx.textAlign = 'center';
@@ -3581,12 +3634,12 @@
       ctx.fillStyle = '#ffffff';
       ctx.shadowColor = '#ff2d95';
       ctx.shadowBlur = 14;
-      ctx.fillText('◆ NITRO BOOST ◆', W / 2, 72);
+      ctx.fillText('◆ NITRO BOOST ◆', W / 2, topRowY - 8);
       ctx.shadowBlur = 0;
     }
 
-    drawEnvironmentBadge();
-    drawComboBadge();
+    drawEnvironmentBadge(layout);
+    drawComboBadge(layout);
     ctx.restore();
   }
 
@@ -3744,8 +3797,8 @@
     ctx.restore();
 
     const hudVisible = state === STATE.PLAYING || state === STATE.PAUSED || state === STATE.COUNTDOWN;
-    setHudOverlayVisible(hudVisible);
-    if (hudVisible) updateHtmlHud();
+    setHudOverlayVisible(false);
+    if (hudVisible) drawHUD();
     if (state === STATE.PAUSED) drawPauseOverlay();
   }
 
