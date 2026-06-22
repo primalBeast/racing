@@ -96,6 +96,12 @@
   const TRAFFIC_CULL_ABOVE = 1100;
   const MAX_HIT_POINTS = 3;
   const KNOCKOUT_DURATION = 10;
+  const KNOCKOUT_SPIN_MIN = 16;
+  const KNOCKOUT_SPIN_MAX = 28;
+  const KNOCKOUT_LAUNCH_VX = 12;
+  const KNOCKOUT_LAUNCH_VY = 18;
+  const TRAFFIC_SPAWN_ABOVE_MIN = 32;
+  const TRAFFIC_SPAWN_ABOVE_MAX = 160;
   const PLAYER_HIT_INVULN = 1.1;
   const BOUNCE_STRENGTH = 3.2;
   const BOUNCE_DAMPING = 0.86;
@@ -740,14 +746,15 @@
     return roadOffset + (H - obs.y);
   }
 
-  function trafficSpawnScreenY(height, currentSpeed, trafficSpeed) {
-    const approach = Math.max(4, currentSpeed - trafficSpeed);
-    const playerWorldY = worldYAtScreenY(player.y);
-    const lead = TRAFFIC_LEAD_MIN + approach * TRAFFIC_LEAD_APPROACH_SCALE;
-    const spawnWorldY = playerWorldY + lead;
-    const spawnY = screenYFromWorldY(spawnWorldY);
-    const aheadOfPlayer = player.y - height - 120;
-    return Math.min(-height - 48, aheadOfPlayer, spawnY);
+  function trafficSpawnScreenY(height) {
+    return -height - TRAFFIC_SPAWN_ABOVE_MIN - Math.random() * (TRAFFIC_SPAWN_ABOVE_MAX - TRAFFIC_SPAWN_ABOVE_MIN);
+  }
+
+  function isSpawnOnRoad(x, y, width, height) {
+    const centerY = y + height * 0.52;
+    const bounds = roadBoundsAtScreenY(centerY);
+    const halfW = width * 0.5;
+    return x - halfW >= bounds.left + 6 && x + halfW <= bounds.right - 6;
   }
 
   function isTrafficBehind(obs) {
@@ -1790,37 +1797,40 @@
   }
 
   function knockoutTraffic(obs, currentSpeed) {
-    if (obs.knockedOut || obs.exploded) return false;
+    if (obs.knockedOut) return false;
 
     const depth = overlapDepth(player, obs);
     if (depth.x <= 0 || depth.y <= 0) return false;
 
     const { midX, midY } = bounceCars(player, obs, depth, currentSpeed);
-    const pushDir = player.x < obs.x ? -1 : 1;
-    player.vx += pushDir * BOUNCE_STRENGTH * 0.6;
+    const pushDir = player.x < obs.x ? 1 : -1;
+    player.vx += pushDir * BOUNCE_STRENGTH * 0.45;
 
     obs.knockedOut = true;
-    obs.exploded = true;
-    const obsCx = obs.x;
-    const obsCy = obs.y + obs.height * 0.45;
-    spawnCarExplosion(obsCx, obsCy, obs.width, obs.height, '#ff2d95');
+    obs.passed = true;
+    obs.spinOutTimer = SPINOUT_DURATION + 1.8 + Math.random() * 0.8;
+    obs.spinOutRate = pushDir * (KNOCKOUT_SPIN_MIN + Math.random() * (KNOCKOUT_SPIN_MAX - KNOCKOUT_SPIN_MIN));
+    obs.vx = pushDir * (KNOCKOUT_LAUNCH_VX + Math.random() * 8) + (Math.random() - 0.5) * 4;
+    obs.vy = -(KNOCKOUT_LAUNCH_VY + Math.random() * 10 + currentSpeed * 0.08);
+    obs.speed = Math.max(kmhToSpeed(TRAFFIC_KMH_MIN * 0.25), obs.speed - currentSpeed * 0.35);
 
     const bonus = Math.floor(320 * difficulty * scoreMultiplier);
     score += bonus;
     combo = Math.min(10, combo + 1);
     comboTimer = 4;
-    shakeTimer = Math.max(shakeTimer, 6);
+    shakeTimer = Math.max(shakeTimer, 8);
     playKnockoutSound();
     addFloatingText(obs.x, obs.y - 18, 'K.O.', '#ff2d95');
     addFloatingText(obs.x, obs.y - 38, `+${bonus}`, '#ffe14d');
     spawnCollisionParticles(midX, midY);
+    if (perfProfile.spinoutSparks) spawnSpinoutSparks(obs.x, obs.y + obs.height * 0.55);
     return true;
   }
 
   function resolvePlayerCollisions(currentSpeed) {
     if (knockoutTimer > 0) {
       for (const obs of obstacles) {
-        if (obs.knockedOut || obs.exploded) continue;
+        if (obs.knockedOut) continue;
         if (!carsOverlap(player, obs)) continue;
         knockoutTraffic(obs, currentSpeed);
       }
@@ -1889,6 +1899,7 @@
         for (let j = i + 1; j < obstacles.length; j++) {
           const a = obstacles[i];
           const b = obstacles[j];
+          if (a.knockedOut || b.knockedOut) continue;
           if (!carsOverlap(a, b)) continue;
 
           const depth = overlapDepth(a, b);
@@ -1907,7 +1918,7 @@
     }
 
     obstacles.forEach((obs) => {
-      if (obs.spinOutTimer > 0) return;
+      if (obs.knockedOut || obs.spinOutTimer > 0) return;
       const centerY = obs.y + obs.height * 0.52;
       const laneX = laneXFromFraction(centerY, obs.laneFraction);
       const maxDrift = obs.width * 0.22;
@@ -1919,11 +1930,13 @@
     const carType = pickTrafficCar();
     const { width, height } = carType;
     const traffic = randomTrafficSpeed(currentSpeed);
-    const spawnY = trafficSpawnScreenY(height, currentSpeed, traffic.speed);
-    if (spawnY >= player.y - height) return;
+    const spawnY = trafficSpawnScreenY(height);
+    if (spawnY > -height) return;
+    if (spawnY >= player.y - height * 1.4) return;
 
     const spawn = findClearSpawnLane(spawnY, width, height);
     if (!spawn) return;
+    if (!isSpawnOnRoad(spawn.x, spawnY, width, height)) return;
 
     obstacles.push({
       lane: spawn.lane,
@@ -2238,34 +2251,42 @@
     pickups = pickups.filter((pickup) => !pickup.collected && pickup.y < H + 40);
 
     obstacles.forEach((obs) => {
-      clampTrafficSpeed(obs, currentSpeed);
+      if (!obs.knockedOut) clampTrafficSpeed(obs, currentSpeed);
       obs.prevX = obs.x;
       obs.x += (obs.vx || 0) * dt * 60;
-      const relativeSpeed = Math.max(0.5, currentSpeed - obs.speed);
+      const relativeSpeed = obs.knockedOut ? currentSpeed * 0.35 : Math.max(0.5, currentSpeed - obs.speed);
       obs.y += relativeSpeed + (obs.vy || 0) * dt * 60;
-      obs.vx = applyBounceDamping(obs.vx || 0, dt);
-      obs.vy = applyBounceDamping(obs.vy || 0, dt);
+      if (obs.knockedOut) {
+        obs.vx *= 1 - dt * 0.08;
+        obs.vy *= 1 - dt * 0.05;
+      } else {
+        obs.vx = applyBounceDamping(obs.vx || 0, dt);
+        obs.vy = applyBounceDamping(obs.vy || 0, dt);
+      }
+
       const centerY = obs.y + obs.height * 0.52;
-      const targetX = laneXFromFraction(centerY, obs.laneFraction);
       const spinning = obs.spinOutTimer > 0;
-      const laneBlend = Math.min(1, TRAFFIC_LANE_SMOOTH * dt * (spinning ? 0.12 : 1));
-      obs.x += (targetX - obs.x) * laneBlend;
+      if (!obs.knockedOut) {
+        const targetX = laneXFromFraction(centerY, obs.laneFraction);
+        const laneBlend = Math.min(1, TRAFFIC_LANE_SMOOTH * dt * (spinning ? 0.12 : 1));
+        obs.x += (targetX - obs.x) * laneBlend;
+      }
 
       const forwardVel = Math.abs(currentSpeed - obs.speed) + 0.5;
       const lateralVel = (obs.x - obs.prevX) / Math.max(dt, 0.001);
       if (spinning) {
         obs.spinOutTimer -= dt;
         obs.angle += obs.spinOutRate * dt;
-        obs.spinOutRate *= 1 - dt * 0.42;
-        if (perfProfile.spinoutSparks && animFrame % 3 === 0) {
+        if (!obs.knockedOut) obs.spinOutRate *= 1 - dt * 0.42;
+        if (perfProfile.spinoutSparks && animFrame % (obs.knockedOut ? 2 : 3) === 0) {
           spawnSpinoutSparks(obs.x, obs.y + obs.height * 0.55);
         }
-      } else {
+      } else if (!obs.knockedOut) {
         const steerHint = Math.max(-1, Math.min(1, lateralVel / (forwardVel * 28)));
         updateCarAngle(obs, lateralVel, forwardVel, steerHint, dt);
       }
 
-      if (!obs.passed && obs.y + obs.height * 0.5 > player.y + player.height * 0.5) {
+      if (!obs.passed && !obs.knockedOut && obs.y + obs.height * 0.5 > player.y + player.height * 0.5) {
         obs.passed = true;
         const passDx = Math.abs(player.x - obs.x);
         const passThreshold = (player.width + obs.width) * 0.38;
@@ -2288,7 +2309,12 @@
     resolvePlayerCollisions(currentSpeed);
 
     obstacles = obstacles.filter((obs) => {
-      if (obs.knockedOut) return false;
+      if (obs.knockedOut) {
+        return obs.y + obs.height > -TRAFFIC_CULL_ABOVE
+          && obs.y < H + 180
+          && obs.x > -obs.width * 2
+          && obs.x < W + obs.width * 2;
+      }
       if (obs.y < -obs.height - TRAFFIC_CULL_ABOVE) return false;
       if (obs.y > H + 120) return false;
       if (!obs.passed && isTrafficBehind(obs)) return false;
@@ -2620,15 +2646,18 @@
       if (obs.exploded) return;
       if (obs.y + obs.height < -8) return;
 
-      const enterFade = Math.min(1, (obs.y + obs.height) / 90);
+      const enterFade = obs.knockedOut
+        ? 1
+        : Math.min(1, (obs.y + obs.height) / 90);
       if (enterFade <= 0) return;
       const fogFade = fogVisibilityAtY(obs.y + obs.height * 0.5);
 
       ctx.save();
       ctx.globalAlpha = enterFade * fogFade;
-      if (isNight) drawHeadlightBeams(obs.x, obs.y, obs.width, obs.height);
+      if (isNight && !obs.knockedOut) drawHeadlightBeams(obs.x, obs.y, obs.width, obs.height);
       const img = images[obs.carType.id];
-      drawSprite(img, obs.x, obs.y, obs.width, obs.height, obs.carType.glow, false, obs.angle || 0);
+      const glow = obs.knockedOut ? '#ff2d95' : obs.carType.glow;
+      drawSprite(img, obs.x, obs.y, obs.width, obs.height, glow, false, obs.angle || 0);
       ctx.restore();
     });
   }
@@ -2811,8 +2840,8 @@
     const roadRows = 5;
     const pickupRows = 6;
     const panelH = headerH + roadRows * rowH + sectionGap + 14 + pickupRows * rowH + 12;
-    const x = 14;
-    const y = 172;
+    const x = W - panelW - 14;
+    const y = Math.max(172, H - panelH - 16);
 
     ctx.save();
     drawHudPanel(x, y, panelW, panelH, 'rgba(0, 240, 255, 0.35)');
@@ -3352,7 +3381,6 @@
       }
       if (state === STATE.PLAYING) {
         drawThemeBanner();
-        drawHUD();
         if (showLegend) drawLegend();
       }
     }
@@ -3362,6 +3390,10 @@
       drawEdgeMarginDebugMarkers();
     } else {
       setEdgeMarginDebugVisible(false);
+    }
+
+    if (state === STATE.PLAYING) {
+      drawHUD();
     }
 
     ctx.restore();
