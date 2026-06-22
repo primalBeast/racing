@@ -81,6 +81,9 @@
   let simAccumulator = 0;
   const STATE = { LOADING: 0, TITLE: 1, COUNTDOWN: 2, PLAYING: 3, GAMEOVER: 4, PAUSED: 5 };
   const RAMMER_TRAFFIC_INTERVAL = 50;
+  const REPAIR_TRAFFIC_INTERVAL = 35;
+  const NITRO_TRAFFIC_INTERVAL = 20;
+  const WALL_SOUND_VOLUME = 0.75;
   const COUNTDOWN_DURATION = 3;
   const TRAFFIC_MAX_SPEED_RATIO = 0.84;
   const STEER_BASE = 12;
@@ -170,6 +173,8 @@
   let themeBannerTimer = 0;
   let pickupSpawnTimer = 2.5;
   let trafficCarsSinceRammer = 0;
+  let trafficCarsSinceRepair = 0;
+  let trafficCarsSinceNitro = 0;
   let driftSparkTimer = 0;
   let showLegend = true;
   let roadOffset = 0;
@@ -1080,6 +1085,8 @@
     themeBannerTimer = 3.2;
     pickupSpawnTimer = 0.8;
     trafficCarsSinceRammer = 0;
+    trafficCarsSinceRepair = 0;
+    trafficCarsSinceNitro = 0;
     driftSparkTimer = 0;
     showLegend = perfProfile.showLegendDefault;
     lastTime = performance.now();
@@ -1426,7 +1433,7 @@
     if (!audioCtx) return;
     const now = audioCtx.currentTime;
     const impact = Math.min(1, speedToKmh(speed) / 180);
-    const vol = 0.14 + impact * 0.16;
+    const vol = (0.14 + impact * 0.16) * WALL_SOUND_VOLUME;
 
     const thud = audioCtx.createOscillator();
     const thudGain = audioCtx.createGain();
