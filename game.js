@@ -179,6 +179,10 @@
   let trafficCarsSinceRepair = 0;
   let trafficCarsSinceNitro = 0;
   let trafficCarsSinceBoost = 0;
+  let rammerCarsUntilSpawn = 0;
+  let repairCarsUntilSpawn = 0;
+  let nitroCarsUntilSpawn = 0;
+  let boostCarsUntilSpawn = 0;
   let driftSparkTimer = 0;
   let showLegend = true;
   let roadOffset = 0;
@@ -1120,6 +1124,7 @@
     trafficCarsSinceRepair = 0;
     trafficCarsSinceNitro = 0;
     trafficCarsSinceBoost = 0;
+    initPickupSchedules();
     driftSparkTimer = 0;
     showLegend = perfProfile.showLegendDefault;
     lastTime = performance.now();
@@ -1678,23 +1683,39 @@
     pickup.collected = true;
   }
 
-  function pickPickupType() {
-    if (trafficCarsSinceRammer >= RAMMER_TRAFFIC_INTERVAL) {
+  function randomPickupInterval(maxInterval) {
+    const minInterval = Math.max(1, Math.floor(maxInterval / 2));
+    return minInterval + Math.floor(Math.random() * (maxInterval - minInterval + 1));
+  }
+
+  function initPickupSchedules() {
+    rammerCarsUntilSpawn = randomPickupInterval(RAMMER_TRAFFIC_INTERVAL);
+    repairCarsUntilSpawn = randomPickupInterval(REPAIR_TRAFFIC_INTERVAL);
+    nitroCarsUntilSpawn = randomPickupInterval(NITRO_TRAFFIC_INTERVAL);
+    boostCarsUntilSpawn = randomPickupInterval(BOOST_TRAFFIC_INTERVAL);
+  }
+
+  function scheduleNextPickup(type) {
+    if (type === 'rammer') {
       trafficCarsSinceRammer = 0;
-      return 'rammer';
-    }
-    if (trafficCarsSinceRepair >= REPAIR_TRAFFIC_INTERVAL) {
+      rammerCarsUntilSpawn = randomPickupInterval(RAMMER_TRAFFIC_INTERVAL);
+    } else if (type === 'repair') {
       trafficCarsSinceRepair = 0;
-      return 'repair';
-    }
-    if (trafficCarsSinceNitro >= NITRO_TRAFFIC_INTERVAL) {
+      repairCarsUntilSpawn = randomPickupInterval(REPAIR_TRAFFIC_INTERVAL);
+    } else if (type === 'nitro') {
       trafficCarsSinceNitro = 0;
-      return 'nitro';
-    }
-    if (trafficCarsSinceBoost >= BOOST_TRAFFIC_INTERVAL) {
+      nitroCarsUntilSpawn = randomPickupInterval(NITRO_TRAFFIC_INTERVAL);
+    } else if (type === 'boost') {
       trafficCarsSinceBoost = 0;
-      return 'boost';
+      boostCarsUntilSpawn = randomPickupInterval(BOOST_TRAFFIC_INTERVAL);
     }
+  }
+
+  function pickPickupType() {
+    if (trafficCarsSinceRammer >= rammerCarsUntilSpawn) return 'rammer';
+    if (trafficCarsSinceRepair >= repairCarsUntilSpawn) return 'repair';
+    if (trafficCarsSinceNitro >= nitroCarsUntilSpawn) return 'nitro';
+    if (trafficCarsSinceBoost >= boostCarsUntilSpawn) return 'boost';
     return null;
   }
 
@@ -1714,6 +1735,7 @@
       type,
       spin: Math.random() * Math.PI * 2,
     });
+    scheduleNextPickup(type);
   }
 
   function spawnDriftSparks() {
