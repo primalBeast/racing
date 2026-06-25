@@ -84,6 +84,7 @@
   const REPAIR_TRAFFIC_INTERVAL = 35;
   const NITRO_TRAFFIC_INTERVAL = 20;
   const BOOST_TRAFFIC_INTERVAL = 35;
+  const SHOW_EDGE_DEBUG_MARKERS = false;
   const OFF_ROAD_EXPLODE_DELAY = 2;
   const OFF_ROAD_FALL_GRAVITY = 1.85;
   const WALL_SOUND_VOLUME = 0.375;
@@ -3830,10 +3831,12 @@
       }
     }
 
-    const showEdgeDebug = state === STATE.PLAYING
+    const showEdgeDebug = SHOW_EDGE_DEBUG_MARKERS && (
+      state === STATE.PLAYING
       || state === STATE.PAUSED
       || state === STATE.COUNTDOWN
-      || state === STATE.GAMEOVER;
+      || state === STATE.GAMEOVER
+    );
     setEdgeMarginDebugVisible(showEdgeDebug);
     if (showEdgeDebug) drawEdgeMarginDebugMarkers();
 
