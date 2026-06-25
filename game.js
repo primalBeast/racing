@@ -118,7 +118,7 @@
   const PLAYER_HIT_INVULN = 1.1;
   const BOUNCE_STRENGTH = 3.2;
   const BOUNCE_DAMPING = 0.86;
-  const DAY_NIGHT_CYCLE = 72;
+  const DAY_NIGHT_CYCLE = 300;
   const WEATHER_GRIP = { clear: 1, rain: 0.74, fog: 0.9, snow: 0.84 };
   const WEATHER_FOG = { clear: 0, rain: 0.1, fog: 0.78, snow: 0.25 };
   const WEATHER_RAIN = { clear: 0, rain: 1, fog: 0.18, snow: 0.08 };
@@ -1230,17 +1230,23 @@
     return {
       phase,
       sun,
-      isNight: sun < 0.34,
+      isNight: sun < 0.38,
       label: getTimeOfDayLabel(phase),
     };
   }
 
   function getTimeOfDayLabel(phase) {
-    if (phase < 0.1 || phase >= 0.9) return 'Night';
-    if (phase < 0.22) return 'Dawn';
-    if (phase < 0.58) return 'Day';
-    if (phase < 0.78) return 'Dusk';
+    if (phase < 0.18 || phase >= 0.82) return 'Night';
+    if (phase < 0.28) return 'Dawn';
+    if (phase < 0.62) return 'Day';
+    if (phase < 0.82) return 'Dusk';
     return 'Night';
+  }
+
+  function getNightDarkness() {
+    const { sun, isNight } = getDayNightLighting();
+    if (!isNight) return 0;
+    return 0.62 + (1 - sun / 0.38) * 0.34;
   }
 
   function weatherGripMult() {
@@ -1273,10 +1279,10 @@
     ctx.save();
     if (sun < 0.38) {
       const night = 1 - sun / 0.38;
-      ctx.fillStyle = `rgba(6, 10, 36, ${0.5 * night})`;
+      ctx.fillStyle = `rgba(2, 4, 18, ${0.72 * night})`;
       ctx.fillRect(0, 0, W, H);
       const moonGlow = ctx.createRadialGradient(W * 0.78, H * 0.14, 0, W * 0.78, H * 0.14, 120);
-      moonGlow.addColorStop(0, `rgba(180, 200, 255, ${0.12 * night})`);
+      moonGlow.addColorStop(0, `rgba(180, 200, 255, ${0.08 * night})`);
       moonGlow.addColorStop(1, 'rgba(180, 200, 255, 0)');
       ctx.fillStyle = moonGlow;
       ctx.fillRect(0, 0, W, H);
@@ -1329,46 +1335,130 @@
     ctx.restore();
   }
 
-  function drawHeadlightBeams(x, y, width, height, beamLength = 95) {
+  function getHeadlightBeamParams(x, y, width, height, beamLength = 110, intensity = 1) {
     const frontY = y + height * 0.14;
-    const beamEndY = frontY - beamLength;
-    const spread = width * 0.42;
-    ctx.save();
-    ctx.globalAlpha = 0.55;
-    const cone = ctx.createLinearGradient(x, frontY, x, beamEndY);
-    cone.addColorStop(0, 'rgba(255, 252, 210, 0.55)');
-    cone.addColorStop(0.45, 'rgba(255, 248, 180, 0.18)');
-    cone.addColorStop(1, 'rgba(255, 248, 180, 0)');
-    ctx.fillStyle = cone;
+    return {
+      x,
+      y,
+      width,
+      height,
+      frontY,
+      beamEndY: frontY - beamLength,
+      spread: width * 0.5,
+      intensity,
+      lampY: y + height * 0.1,
+    };
+  }
+
+  function collectHeadlightBeams() {
+    const { isNight } = getDayNightLighting();
+    if (!isNight) return [];
+
+    const beams = [];
+    if (!fatalCrash) {
+      const scale = nitroActive ? 1.05 : 1;
+      const w = player.width * scale;
+      const h = player.height * scale;
+      beams.push(getHeadlightBeamParams(
+        player.x,
+        player.y,
+        w,
+        h,
+        120 + speedToKmh(speed) * 0.35,
+        1.2
+      ));
+    }
+
+    obstacles.forEach((obs) => {
+      if (obs.exploded || obs.knockedOut || obs.offRoadFall) return;
+      if (obs.y + obs.height < -8 || obs.y > H + 40) return;
+      beams.push(getHeadlightBeamParams(obs.x, obs.y, obs.width, obs.height, 78, 0.68));
+    });
+
+    return beams;
+  }
+
+  function drawHeadlightConePath(beam) {
+    const { x, frontY, beamEndY, spread } = beam;
     ctx.beginPath();
-    ctx.moveTo(x - 7, frontY);
+    ctx.moveTo(x - 9, frontY);
     ctx.lineTo(x - spread, beamEndY);
     ctx.lineTo(x + spread, beamEndY);
-    ctx.lineTo(x + 7, frontY);
+    ctx.lineTo(x + 9, frontY);
     ctx.closePath();
-    ctx.fill();
+  }
 
+  function drawHeadlightRevealMask(beam) {
+    const { x, frontY, beamEndY, intensity } = beam;
+    const grad = ctx.createLinearGradient(x, frontY, x, beamEndY);
+    grad.addColorStop(0, `rgba(0, 0, 0, ${0.98 * intensity})`);
+    grad.addColorStop(0.42, `rgba(0, 0, 0, ${0.62 * intensity})`);
+    grad.addColorStop(0.78, `rgba(0, 0, 0, ${0.22 * intensity})`);
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = grad;
+    drawHeadlightConePath(beam);
+    ctx.fill();
+  }
+
+  function drawHeadlightRoadGlow(beam) {
+    const { x, frontY, beamEndY, intensity } = beam;
+    const grad = ctx.createLinearGradient(x, frontY, x, beamEndY);
+    grad.addColorStop(0, `rgba(255, 244, 190, ${0.55 * intensity})`);
+    grad.addColorStop(0.35, `rgba(255, 230, 150, ${0.28 * intensity})`);
+    grad.addColorStop(0.7, `rgba(255, 210, 120, ${0.1 * intensity})`);
+    grad.addColorStop(1, 'rgba(255, 200, 100, 0)');
+    ctx.fillStyle = grad;
+    drawHeadlightConePath(beam);
+    ctx.fill();
+  }
+
+  function drawHeadlightLamps(beam) {
+    const { x, width, lampY } = beam;
+    ctx.save();
     ctx.globalAlpha = 0.95;
     ctx.fillStyle = '#fff8c8';
     ctx.shadowColor = '#fff8c8';
     ctx.shadowBlur = 10;
-    const lampY = y + height * 0.1;
     ctx.fillRect(x - width * 0.24, lampY, 5, 4);
     ctx.fillRect(x + width * 0.19, lampY, 5, 4);
     ctx.restore();
   }
 
-  function drawPlayerHeadlights() {
+  function drawNightFogOfWarOverlay() {
+    const darkness = getNightDarkness();
+    if (darkness <= 0) return;
+
+    ctx.save();
+    const grad = ctx.createLinearGradient(0, H, 0, 0);
+    grad.addColorStop(0, `rgba(1, 2, 10, ${darkness * 0.12})`);
+    grad.addColorStop(0.22, `rgba(1, 2, 12, ${darkness * 0.42})`);
+    grad.addColorStop(0.48, `rgba(0, 0, 8, ${darkness * 0.74})`);
+    grad.addColorStop(0.72, `rgba(0, 0, 6, ${darkness * 0.92})`);
+    grad.addColorStop(1, `rgba(0, 0, 4, ${Math.min(0.97, darkness)})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function drawNightHeadlightIllumination() {
     const { isNight } = getDayNightLighting();
     if (!isNight) return;
-    const scale = nitroActive ? 1.05 : 1;
-    drawHeadlightBeams(
-      player.x,
-      player.y,
-      player.width * scale,
-      player.height * scale,
-      110
-    );
+
+    const beams = collectHeadlightBeams();
+    if (!beams.length) return;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    beams.forEach((beam) => drawHeadlightRevealMask(beam));
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.48;
+    beams.forEach((beam) => drawHeadlightRoadGlow(beam));
+    ctx.restore();
+
+    beams.forEach((beam) => drawHeadlightLamps(beam));
   }
 
   function getHudTints() {
@@ -2935,7 +3025,6 @@
   }
 
   function drawObstacles() {
-    const { isNight } = getDayNightLighting();
     obstacles.forEach((obs) => {
       if (obs.exploded) return;
       if (obs.y + obs.height < -8) return;
@@ -2948,7 +3037,6 @@
 
       ctx.save();
       ctx.globalAlpha = enterFade * fogFade;
-      if (isNight && !obs.knockedOut) drawHeadlightBeams(obs.x, obs.y, obs.width, obs.height);
       const img = images[obs.carType.id];
       const glow = obs.knockedOut ? '#ff2d95' : obs.carType.glow;
       drawSprite(img, obs.x, obs.y, obs.width, obs.height, glow, false, obs.angle || 0);
@@ -3813,11 +3901,12 @@
       drawRoad();
       drawPickups();
       drawObstacles();
-      if (!fatalCrash) drawPlayerHeadlights();
       drawPlayer();
       drawRammerCountdown();
       drawFatalCrashExplosions();
       drawParticles();
+      drawNightFogOfWarOverlay();
+      drawNightHeadlightIllumination();
       drawRain();
       drawWeatherSnow();
       drawFogOverlay();
